@@ -3,3 +3,132 @@
 [![Copier](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/copier-org/copier/master/img/badge/badge-grayscale-inverted-border-orange.json)](https://github.com/copier-org/copier)
 
 A [Copier](https://copier.readthedocs.io/) template that overlays agentic-engineering conventions onto any repository — standalone or layered on top of another Copier template (for example [browniebroke/pypackage-template](https://github.com/browniebroke/pypackage-template)).
+
+## What it ships
+
+Generated projects receive:
+
+- **Agent docs** — `AGENTS.md` and `CLAUDE.md`, templated with project name, description, slug, and (optionally) forge/repo URL.
+- **Skills** — pinned in `skills-lock.json`; a post-render step runs `npx skills@latest experimental_install` to populate `.agents/skills/`.
+- **Glossary** — `docs/glossary/` with a seed entry for the project itself. Terms are resolved with `uvx disambiguate`.
+- **Architecture stub** — `docs/architecture.md` linking to the project glossary term.
+- **Cross-cutting lint hooks** (optional) — when `agentic_precommit` is `prek`, a `.pre-commit-config.yaml` covering commit messages, JSON, Markdown, and spelling only. No unit tests in prek — tests belong in CI. Language-specific linting stays with whatever template owns the source code.
+- **Shared config** — `.editorconfig`, `.codespellrc`, `commitlint.config.mjs`, and `scripts/doctor.sh` (host-tool checks).
+
+All Copier questions use the `agentic_` prefix so this template can layer without colliding with other templates. Answers are stored in `.copier-answers.agentic.yml` (not Copier's default).
+
+## Prerequisites
+
+**To run `copier copy` / `copier update` on this template**, install [copier-template-extensions](https://github.com/copier-org/copier-template-extensions) alongside Copier (loads template-local Jinja helpers for forge/owner defaults):
+
+```shell
+pip install copier copier-template-extensions
+# or, in this repo: uv sync
+```
+
+Host tools checked by `scripts/doctor.sh` (see [Tooling](#tooling)):
+
+| Tool | When required |
+| --- | --- |
+| `git` | always |
+| `npx` | always (skills) |
+| `uvx` | always (disambiguate / glossary) |
+| `gh` | always (used by `ghx`; overridden in agent PATH) |
+| `ghx` | deferred — doctor prints a warning only |
+| `prek` | when `agentic_precommit` is `prek` |
+
+Run `scripts/doctor.sh --install` to bootstrap missing host CLIs via your platform package manager (`brew` on macOS, `apt` on Debian/Ubuntu). Doctor never installs project dependencies (`uv sync`, `npm install`, etc.).
+
+## Standalone usage
+
+Generate agentic scaffolding into a new or existing directory:
+
+```shell
+copier copy --trust <path-or-url-to-this-template> path-to-project
+```
+
+Use `--defaults` to accept defaults without prompts. Copier writes answers to `.copier-answers.agentic.yml` and renders files from the `template/` subdirectory.
+
+Refresh after template updates:
+
+```shell
+copier update --answers-file .copier-answers.agentic.yml --trust
+```
+
+## Layering on another template
+
+Apply a language or domain template first, then overlay agentic conventions with a separate answers file:
+
+```shell
+# 1. Base project (example: Python package)
+copier copy --trust gh:browniebroke/pypackage-template my-project
+cd my-project
+
+# 2. Agentic overlay (same target directory)
+copier copy --trust <path-or-url-to-agentic-template> .
+
+# 3. Refresh only the agentic layer later
+copier update --answers-file .copier-answers.agentic.yml --trust
+```
+
+Each template keeps its own answers file. The base template retains `.copier-answers.yml` (or whatever it defines); this template always uses `.copier-answers.agentic.yml`.
+
+### Choosing `agentic_precommit`
+
+| Value | Effect |
+| --- | --- |
+| `prek` | Writes `.pre-commit-config.yaml` with cross-cutting hooks (commitlint, JSON, Markdown, codespell). No unit-test hooks. |
+| `none` | Does **not** write `.pre-commit-config.yaml`. Use when the base template already owns pre-commit, or you manage hooks yourself. |
+
+When layering on pypackage-template, set `agentic_precommit` to `none` if you want pypackage's language hooks to remain the sole `.pre-commit-config.yaml` owner.
+
+## File-ownership policy
+
+This template only writes files it is configured to own. It does not silently take over files owned by a layered template.
+
+| File / area | Owner |
+| --- | --- |
+| `AGENTS.md`, `CLAUDE.md` | agentic-template |
+| `skills-lock.json`, `.agents/skills/` | agentic-template |
+| `docs/glossary/`, `docs/architecture.md` | agentic-template |
+| `.editorconfig`, `.codespellrc`, `commitlint.config.mjs` | agentic-template |
+| `scripts/doctor.sh` | agentic-template |
+| `.pre-commit-config.yaml` | agentic-template **only** when `agentic_precommit` is `prek`; otherwise not written |
+| Source code, package manifests, language lint hooks | base / layered template |
+
+**Conflict detection** is not enforced inside `copier.yml`. Copier's default update behaviour may produce `.rej` files and still exit zero. CI on this repository runs `copier update` against fixture projects and fails if any `.rej` files exist or the tree is unexpectedly dirty — surfacing collisions (for example both templates touching `.pre-commit-config.yaml`) instead of letting silent rejects rot.
+
+## Configuration
+
+Questions asked at generation time (all prefixed `agentic_`):
+
+| Variable | Description |
+| --- | --- |
+| `agentic_project_name` | Human-readable project name (agent docs, glossary). |
+| `agentic_project_description` | Short description (glossary seed entry). |
+| `agentic_project_slug` | Kebab-case slug (paths, repo URL). Auto-derived from `agentic_project_name`; override if needed. |
+| `agentic_precommit` | `prek` or `none`. |
+| `agentic_forge` | `github`, `forgejo`. Auto-defaults to `github` when the git remote contains `github.com`. |
+| `agentic_forgejo_host` | Forgejo hostname; asked only when `agentic_forge` is `forgejo`. |
+| `agentic_repo_owner` | Repository owner / org. Defaults from `gh api user` or `git config github.user`; fails if neither resolves. |
+| `agentic_repo_host` | Derived — not asked. `github.com`, the Forgejo host, or unset. |
+
+## Tooling
+
+`scripts/doctor.sh` is the single source of truth for required host tools. It supports two modes:
+
+- **Check** (default) — print a ✓/✗ report, exit non-zero if anything required is missing. Used by post-render tasks and safe to run any time.
+- **Install** (`--install` / `--fix`) — opt-in bootstrap of missing host CLIs only.
+
+Post-render tasks call doctor in check mode only — never auto-install.
+
+## Developing this template
+
+```shell
+uv sync
+uv run pytest
+```
+
+Tests generate projects into temporary directories via Copier's Python API and assert conditional files (for example `.pre-commit-config.yaml` absent when `agentic_precommit` is `none`).
+
+A smoke test (`test_e2e_smoke_full_render_runs_tasks`) exercises the full generation path — including the post-render `_tasks` step — and asserts a clean tree. It skips automatically when `git`, `npx`, or `uvx` are not on `PATH`.

@@ -1,0 +1,84 @@
+# questions
+agentic_project_name:
+  type: str
+  help: "Human-readable project name (agent docs, glossary)."
+  placeholder: "My Project"
+
+agentic_project_description:
+  type: str
+  help: "Short project description (glossary seed entry)."
+  placeholder: "A helpful project."
+
+agentic_project_slug:
+  type: str
+  help: "Project slug in kebab-case (repo URL, glossary path). Auto-derived from name; override if needed."
+  default: "{{ agentic_project_name | lower | replace(' ', '-') | replace('_', '-') }}"
+
+agentic_precommit:
+  type: str
+  help: "Install cross-cutting prek hooks (commitlint, JSON, Markdown, codespell)?"
+  choices:
+    - prek
+    - none
+  default: prek
+
+agentic_forge:
+  type: str
+  help: "Forge hosting the repository."
+  choices:
+    - github
+    - forgejo
+  default: |-
+    {%- set remote_forge = detect_forge() -%}
+    {%- if remote_forge -%}
+    {{ remote_forge }}
+    {%- else -%}
+    github
+    {%- endif %}
+  when: "{{ not detect_forge() }}"
+
+agentic_forgejo_host:
+  type: str
+  help: "Forgejo hostname (e.g. git.example.com)."
+  when: "{{ agentic_forge == 'forgejo' }}"
+  validator: "{% if agentic_forge == 'forgejo' and not agentic_forgejo_host %}Required{% endif %}"
+
+agentic_repo_host:
+  type: str
+  default: |-
+    {%- if agentic_forge == 'github' -%}
+    github.com
+    {%- else -%}
+    {{ agentic_forgejo_host }}
+    {%- endif %}
+  when: false
+
+agentic_repo_owner:
+  type: str
+  help: "Repository owner (user or org)."
+  default: |-
+    {%- set owner = resolve_repo_owner() -%}
+    {%- if owner -%}
+    {{ owner }}
+    {%- else -%}
+    {{ UNSET }}
+    {%- endif %}
+  validator: "{% if not agentic_repo_owner %}Could not detect repo owner — run `gh auth login` or `git config github.user <login>`, or enter manually{% endif %}"
+
+# Copier metadata
+_min_copier_version: "9.11.0"
+_subdirectory: template
+_answers_file: .copier-answers.agentic.yml
+_jinja_extensions:
+  - copier_template_extensions.TemplateExtensionLoader
+  - extensions/agentic.py:AgenticExtension
+
+_tasks:
+  - npx skills@latest experimental_install
+  - bash scripts/doctor.sh
+  # Register prek git hooks so commits actually run them. A config file alone
+  # does nothing — `prek install` must write .git/hooks. Guard on a git work
+  # tree (copier may render into a plain dir) and on prek being selected.
+  - >-
+    {% if agentic_precommit == 'prek' %}git rev-parse --is-inside-work-tree
+    >/dev/null 2>&1 && prek install || true{% else %}true{% endif %}

@@ -1,0 +1,22 @@
+[project]
+name = "agentic-template"
+version = "0.1.0"
+description = "Copier template for agentic engineering scaffolding"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "copier==9.*",
+  "copier-template-extensions>=0.3.3",
+  "pytest==9.*",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+addopts = ["-v", "-Wdefault"]
+minversion = "9.0"
+testpaths = ["tests"]
