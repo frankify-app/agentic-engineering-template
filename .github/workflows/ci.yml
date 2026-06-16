@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.12"
+          - "3.13"
+        os:
+          - ubuntu-latest
+          - macOS-latest
+    runs-on: ${{ matrix.os }}
+    name: "Template: ${{ matrix.python-version }} - ${{ matrix.os }}"
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - run: git config --global user.name actions-user
+      - run: git config --global user.email action@github.com
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      # prek is a required host tool for prek-enabled projects; the smoke test
+      # runs the post-render doctor check, which fails if prek is absent.
+      - run: |
+          uv tool install prek
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        shell: bash
+      - run: uv sync --no-python-downloads
+        shell: bash
+      - run: uv run pytest
+        shell: bash
+
+  conflict-detection:
+    # Enforcement arm of the file-ownership policy: copier update merges and
+    # writes .rej files but still exits 0. Generate a fixture, run the update
+    # path, and fail the job if any .rej survive or the tree is unexpectedly
+    # dirty — surfacing collisions instead of letting silent rejects rot.
+    runs-on: ubuntu-latest
+    name: "Conflict detection (copier update)"
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+      - run: git config --global user.name actions-user
+      - run: git config --global user.email action@github.com
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      # copier update runs the post-render doctor check, which requires prek.
+      - run: |
+          uv tool install prek
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        shell: bash
+      - run: uv sync --no-python-downloads
+        shell: bash
+      - name: Generate fixture, run update path, detect conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          template_dir="$PWD"
+          fixture_dir="$(mktemp -d)/fixture"
+
+          # copier update reads the template ref from the answers file's
+          # _commit, so the initial copy must pin a committed ref.
+          git tag -f ci-conflict-check
+          data=(
+            --data agentic_project_name="Snake Farm"
+            --data agentic_project_description="A sample."
+            --data agentic_repo_owner=actions-user
+          )
+
+          uv run copier copy --trust --defaults --vcs-ref ci-conflict-check \
+            "${data[@]}" "$template_dir" "$fixture_dir"
+
+          git -C "$fixture_dir" init -q
+          git -C "$fixture_dir" add -A
+          git -C "$fixture_dir" commit -qm "chore: generated fixture"
+
+          # Re-render the agentic layer against the same template state.
+          uv run copier update --trust --defaults "${data[@]}" \
+            --answers-file .copier-answers.agentic.yml "$fixture_dir"
+
+          rejects="$(find "$fixture_dir" -name '*.rej' -print)"
+          if [[ -n "$rejects" ]]; then
+            echo "::error::copier update produced .rej files (unresolved conflicts):"
+            echo "$rejects"
+            exit 1
+          fi
+
+          # .copier-answers.agentic.yml legitimately records the resolved
+          # commit on update; only other dirty paths signal a real conflict.
+          dirty="$(git -C "$fixture_dir" status --porcelain \
+            | grep -v ' \.copier-answers\.agentic\.yml$' || true)"
+          if [[ -n "$dirty" ]]; then
+            echo "::error::copier update left the fixture tree unexpectedly dirty:"
+            echo "$dirty"
+            exit 1
+          fi
+
+          echo "No .rej files and clean tree — conflict detection passed."
