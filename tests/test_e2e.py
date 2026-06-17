@@ -24,6 +24,7 @@ COMMON_FILES = frozenset(
         "commitlint.config.mjs",
         ".copier-answers.agentic.yml",
         "docs/architecture.md",
+        "docs/glossary/.markdownlint-cli2.yaml",
         "docs/glossary/snake-farm.md",
         "scripts/doctor.sh",
     }
