@@ -35,9 +35,7 @@ EXPECTED_WITHOUT_PREK = COMMON_FILES
 
 def _relative_file_tree(root: Path) -> frozenset[str]:
     return frozenset(
-        path.relative_to(root).as_posix()
-        for path in root.rglob("*")
-        if path.is_file()
+        path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()
     )
 
 
@@ -123,9 +121,7 @@ def test_e2e_copy_variants_render_clean_tree(
     """Variant answers still render the same owned file set with substituted values."""
     dst_path = render_project(**overrides)
 
-    expected = {
-        path.replace("snake-farm", slug) for path in EXPECTED_WITH_PREK
-    }
+    expected = {path.replace("snake-farm", slug) for path in EXPECTED_WITH_PREK}
     _assert_tree(dst_path, frozenset(expected))
 
     assert repo_url in (dst_path / "AGENTS.md").read_text()
