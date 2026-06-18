@@ -22,6 +22,45 @@ repos:
     rev: v0.22.0
     hooks:
       - id: markdownlint-cli2
+        # Don't pass filenames: let markdownlint-cli2 do its own globbing so it
+        # can pick up *.md.jinja via the `globs` key in .markdownlint-cli2.yaml.
+        pass_filenames: false
+  - repo: https://github.com/djlint/djLint
+    rev: v1.39.2
+    hooks:
+      # Lint non-markdown Jinja templates (*.sh.jinja, *.yaml.jinja, the copier
+      # answers-file, etc.). shellcheck/yamllint can't parse Jinja, so djLint —
+      # which lints the template itself — is used instead.
+      # *.md.jinja is excluded: markdownlint-cli2 (above) already covers it, and
+      # djLint's HTML rules false-positive on markdown angle-bracket placeholders.
+      - id: djlint-jinja
+        exclude: \.md\.jinja$
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.4
+    hooks:
+      # Lint + format the Python sources (extensions/, tests/).
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      # Lint plain shell scripts. *.sh.jinja is handled by djlint above
+      # (shellcheck can't parse Jinja), so only real *.sh files reach here.
+      - id: shellcheck
+        exclude: \.jinja$
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.37.1
+    hooks:
+      # Lint plain YAML. *.yaml.jinja is handled by djlint above
+      # (yamllint can't parse Jinja).
+      - id: yamllint
+        args: [--strict]
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.7
+    hooks:
+      # Lint GitHub Actions workflows under .github/workflows/.
+      - id: actionlint
   - repo: https://github.com/codespell-project/codespell
     rev: v2.4.2
     hooks:

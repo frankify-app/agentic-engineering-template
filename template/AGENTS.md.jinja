@@ -1,26 +1,32 @@
 # {{ agentic_project_name }} — Agent Guidelines
 
-Repo: https://{{ agentic_repo_host }}/{{ agentic_repo_owner }}/{{ agentic_project_slug }}
+Repo: <https://{{ agentic_repo_host }}/{{ agentic_repo_owner }}/{{ agentic_project_slug }}>
 
 ## Project Specifics
 
 ### Terminology
 
 Ubiquitous language is defined in docs/glossary/. Use
+
 ```bash
 uvx disambiguate <term>
 ```
+
 to get a topologically ordered glossary disambiguating all relevant terms
 to understand the given term.
 
 Before working on a ticket, run:
+
 ```bash
 uvx disambiguate --from <ticket-file>
 ```
+
 or for GitHub issues:
+
 ```bash
 ghx issue view <number> --json body -q .body | uvx disambiguate --from -
 ```
+
 to resolve all referenced terms at once.
 
 ### Architecture
@@ -48,12 +54,12 @@ Live in `.agents/skills/`. Synced using `npx skills update -p -y` — don't edit
 
 **Loading:** Use platform skill tool if available, else read `.agents/skills/<name>/SKILL.md` directly.
 
-| Skill                            | Trigger                                             |
-| -------------------------------- | --------------------------------------------------- |
-| `tdd`        | Test-driven-development for any implementation |
-| `documenting-decisions`          | Any implementation task — place `DECISION:` markers |
-| `requesting-code-review`         | After completing implementation                     |
-| `caveman` | Compact wording when writing prose (issues description, PR description, comments on repo or code)
+| Skill                    | Trigger                                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------------------------- |
+| `tdd`                    | Test-driven-development for any implementation                                                     |
+| `documenting-decisions`  | Any implementation task — place `DECISION:` markers                                                |
+| `requesting-code-review` | After completing implementation                                                                    |
+| `caveman`                | Compact wording when writing prose (issues description, PR description, comments on repo or code)  |
 
 ## Git
 
@@ -80,11 +86,13 @@ Use `run list` / `run view` for workflow-run detail; use `pr checks` / `pr statu
 The modes below are the kinds of work the user will ask for. **Each runs in its own session — possibly a different model or agent** (Review especially). Follow the named skills at each step.
 
 #### Plan
+
 - Explore the codebase. Flag `DECISION:SCOPE` when resolving ambiguities. Use the `documenting-decisions` skill (refs: `pre-approval-gate.md`, `scope-interpretation.md`).
 - Write an issue → `ghx issue create`
 - Set issue metadata → `ghx issue edit` (labels/assignees/milestone)
 
 #### Implement
+
 - Read the given issue and comments → `ghx issue view --comments`
 - Do Test-Driven Development per the `tdd` skill.
 - Implement the minimal code to pass tests, then the remaining code per the ticket spec. Place `DECISION:` markers per the `documenting-decisions` skill (refs: `decision-markers.md`, `marker-examples.md`).
@@ -105,6 +113,7 @@ The modes below are the kinds of work the user will ask for. **Each runs in its 
 - If CI fails, fix it by re-entering this **Implement** workflow.
 
 #### Review
+
 - Read the given issue and comments → `ghx issue view --comments`
 - Review the PR and give Critical / Important feedback per the `requesting-code-review` skill.
 - Submit it as a single review → `ghx pr review`:
@@ -113,12 +122,12 @@ The modes below are the kinds of work the user will ask for. **Each runs in its 
   - Put both in the same `ghx pr review` call; don't split a review across `pr review` and `pr comment`.
 
 #### Apply Review Comments
+
 - Read the given issue and comments → `ghx issue view --comments`
 - Read PR comments and code comments → `ghx pr view --comments`
 - If the review uncovers inconsistencies in the issue, **comment** on it freely → `ghx issue comment`
 - Only **edit** issue content when the user explicitly requests it → `ghx issue edit`. Editing is gated on explicit request because it can overwrite human-authored intent; commenting is always safe, editing is not.
 - Then re-enter the **Implement** workflow.
-
 
 ## Dependencies
 

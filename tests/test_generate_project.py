@@ -4,7 +4,6 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import copier
-import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
