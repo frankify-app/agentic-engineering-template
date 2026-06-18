@@ -22,21 +22,9 @@ repos:
     rev: v0.22.0
     hooks:
       - id: markdownlint-cli2
-        # Don't pass filenames: let markdownlint-cli2 do its own globbing so it
-        # can pick up *.md.jinja via the `globs` key in .markdownlint-cli2.yaml.
-        pass_filenames: false
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.4
-    hooks:
-      # Lint + format the Python sources (extensions/, tests/).
-      - id: ruff-check
-        args: [--fix]
-      - id: ruff-format
   - repo: https://github.com/adrienverge/yamllint
     rev: v1.37.1
     hooks:
-      # Lint plain YAML. *.yaml.jinja is handled by djlint above
-      # (yamllint can't parse Jinja).
       - id: yamllint
         args: [--strict]
   - repo: https://github.com/rhysd/actionlint
