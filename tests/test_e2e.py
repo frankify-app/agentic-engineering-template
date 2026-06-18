@@ -19,6 +19,7 @@ COMMON_FILES = frozenset(
         ".copier-answers.agentic.yml",
         ".editorconfig",
         ".markdownlint-cli2.yaml",
+        ".yamllint.yaml",
         "AGENTS.md",
         "CLAUDE.md",
         "commitlint.config.mjs",
