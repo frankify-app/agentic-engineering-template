@@ -3,11 +3,9 @@ config:
   default: true
   MD013: false # line-length — agent docs use long URLs and table rows
 
-# Lint Jinja-templated markdown (*.md.jinja) in addition to plain markdown.
 globs:
   - "**/*.md"
   - "**/*.markdown"
-  - "**/*.md.jinja"
 
 # Skip git-ignored paths (e.g. _input/, _references/) since the hook now globs
 # instead of receiving the tracked-file list from prek.
