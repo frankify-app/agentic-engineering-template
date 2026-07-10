@@ -60,8 +60,8 @@ Live in `.agents/skills/`. Synced using `npx skills update -p -y` — don't edit
 | `documenting-decisions`  | Any implementation task — place `DECISION:` markers                                                |
 | `requesting-code-review` | After completing implementation                                                                    |
 | `caveman`                | Compact wording when writing prose (issues description, PR description, comments on repo or code)  |
-| `grill-me`               | User asks to be grilled/interviewed about a plan or design before implementation                    |
-| `grill-with-docs`        | Grilling session that also records ADRs and glossary entries as decisions are made                  |
+| `grill-me`               | User asks to be grilled/interviewed about a plan or design before implementation                   |
+| `grill-with-docs`        | Grilling session that also records ADRs and glossary entries as decisions are made                 |
 
 ## Git
 

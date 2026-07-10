@@ -42,6 +42,25 @@ jobs:
       - run: uv run pytest
         shell: bash
 
+  lint:
+    # Enforce the configured prek hooks repo-side: hooks only run at commit
+    # time on contributor machines, so a missing local setup can land lint
+    # violations (see issue #15). This job blocks PRs regardless.
+    runs-on: ubuntu-latest
+    name: "Lint (prek run --all-files)"
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - run: |
+          uv tool install prek
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        shell: bash
+      - run: prek run --all-files --show-diff-on-failure
+        shell: bash
+
   conflict-detection:
     # Enforcement arm of the file-ownership policy: copier update merges and
     # writes .rej files but still exits 0. Generate a fixture, run the update
