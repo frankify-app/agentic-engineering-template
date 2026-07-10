@@ -13,6 +13,18 @@
       "skillPath": "original/documenting-decisions/SKILL.md",
       "computedHash": "3ba6f8d16a89f3dbc1eee34747eb5882e08dff5ccfba71fddf71009915311eef"
     },
+    "grill-me": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/productivity/grill-me/SKILL.md",
+      "computedHash": "f321507f77702a54af1db66549ec1685fc625390d06c57d7949cdcda8eb1b5c7"
+    },
+    "grill-with-docs": {
+      "source": "mattpocock/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/grill-with-docs/SKILL.md",
+      "computedHash": "e7ef25bbee50cda2eb7b3a8ef541db0a0396dad7d369f7d14fb610671dd1864b"
+    },
     "requesting-code-review": {
       "source": "obra/superpowers",
       "sourceType": "github",
