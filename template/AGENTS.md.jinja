@@ -63,8 +63,8 @@ Live in `.agents/skills/`. Synced using `npx skills update -p -y` — don't edit
 | `grill-me`               | User asks to be grilled/interviewed about a plan or design before implementation                   |
 | `grill-with-docs`        | Grilling session that also records ADRs and glossary entries as decisions are made                 |
 | `grilling`               | Core interview loop used by `grill-me`/`grill-with-docs`; also on any 'grill' trigger phrase       |
-| `domain-modeling`        | Pinning down domain terminology (glossary in `docs/glossary/`) or recording decisions during design |
-| `writing-adrs`           | Recording an architectural decision as an ADR in `docs/adr/`, or when another skill flags one       |
+| `domain-modeling`        | Pinning down domain terminology (glossary in `docs/glossary/`) or recording decisions in design    |
+| `writing-adrs`           | Recording an architectural decision as an ADR in `docs/adr/`, or when another skill flags one      |
 
 ## Git
 
