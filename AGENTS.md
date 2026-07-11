@@ -62,6 +62,11 @@ Live in `.agents/skills/`. Synced using `npx skills update -p -y` — don't edit
 | `caveman`                | Compact wording when writing prose (issues description, PR description, comments on repo or code)  |
 | `grill-me`               | User asks to be grilled/interviewed about a plan or design before implementation                   |
 | `grill-with-docs`        | Grilling session that also records ADRs and glossary entries as decisions are made                 |
+| `grilling`               | Core interview loop used by `grill-me`/`grill-with-docs`; also on any 'grill' trigger phrase       |
+| `domain-modeling`        | Pinning down domain terminology (glossary in `docs/glossary/`) or recording decisions in design    |
+| `writing-adrs`           | Recording an architectural decision as an ADR in `docs/adr/`, or when another skill flags one      |
+| `to-tickets`             | Splitting approved work into tracer-bullet issues with blocking edges (reproducible-spec rules)    |
+| `to-spec`                | Turning the current conversation into a spec/PRD and publishing it to the tracker                  |
 
 ## Git
 
