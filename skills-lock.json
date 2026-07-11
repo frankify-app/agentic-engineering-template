@@ -11,13 +11,13 @@
       "source": "frankify-app/skills",
       "sourceType": "github",
       "skillPath": "original/documenting-decisions/SKILL.md",
-      "computedHash": "6de79ad3f21409d7215bb8fb6013357fd53b46054091faf3dddb7d3573b2b157"
+      "computedHash": "82a193cb1992cb223fe5bf5e89e71ea89dcee57d7b5bd71dd03dc9a548fceb6c"
     },
     "domain-modeling": {
-      "source": "mattpocock/skills",
+      "source": "frankify-app/skills",
       "sourceType": "github",
-      "skillPath": "skills/engineering/domain-modeling/SKILL.md",
-      "computedHash": "67343881f5def98487d56243155716110afbcbf22ec92421c882d532b941cb17"
+      "skillPath": "derived/domain-modeling/SKILL.md",
+      "computedHash": "705e60bb831309c734b5922e134bb6af7408c90728ccc904fdd1b7fd5a8e769f"
     },
     "grill-me": {
       "source": "mattpocock/skills",
@@ -48,6 +48,12 @@
       "sourceType": "github",
       "skillPath": "derived/tdd/SKILL.md",
       "computedHash": "b663ec89bd4d0babc7572eb39ce21fe56a95c6da9d74149a17ce93b7c4906253"
+    },
+    "writing-adrs": {
+      "source": "frankify-app/skills",
+      "sourceType": "github",
+      "skillPath": "original/writing-adrs/SKILL.md",
+      "computedHash": "3e3653c8e6ce28927fe0575023c573fad7f41c756c7334f0f3c782d52f79ad3d"
     }
   }
 }
