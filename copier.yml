@@ -22,6 +22,15 @@ agentic_precommit:
     - none
   default: prek
 
+agentic_tracker_cli:
+  type: str
+  help: "Tracker CLI agents must use for repository interaction (issues/PRs/CI)."
+  choices:
+    - ghx
+    - gh
+    - tea
+  default: ghx
+
 agentic_forge:
   type: str
   help: "Forge hosting the repository."

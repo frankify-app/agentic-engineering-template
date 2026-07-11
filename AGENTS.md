@@ -68,6 +68,10 @@ Live in `.agents/skills/`. Synced using `npx skills update -p -y` — don't edit
 | `to-tickets`             | Splitting approved work into tracer-bullet issues with blocking edges (reproducible-spec rules)    |
 | `to-spec`                | Turning the current conversation into a spec/PRD and publishing it to the tracker                  |
 
+### Repo-Local Skill Overrides
+
+- `grilling`: present each question via the platform's multiple-choice dialog (e.g. `AskUserQuestion` in Claude Code) when the platform supports one; fall back to plain-text questions otherwise.
+
 ## Git
 
 - Branch: `<agent>/<issue-number>-<desc>` (e.g. `hermes/42-fix-auth`, `claude/42-fix-auth`)

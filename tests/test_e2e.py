@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # Exact file set the template must produce (no orphans, no omissions).
 COMMON_FILES = frozenset(
     {
+        ".claude/settings.json",
         ".codespellrc",
         ".copier-answers.agentic.yml",
         ".editorconfig",
@@ -26,7 +27,10 @@ COMMON_FILES = frozenset(
         "docs/architecture.md",
         "docs/glossary/.markdownlint-cli2.yaml",
         "docs/glossary/snake-farm.md",
+        "scripts/agent-shims/gh",
+        "scripts/agent-shims/tea",
         "scripts/doctor.sh",
+        "scripts/enable-agent-shims.sh",
         "skills-lock.json",
     }
 )
