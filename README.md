@@ -14,6 +14,7 @@ Generated projects receive:
 - **Architecture stub** — `docs/architecture.md` linking to the project glossary term.
 - **Cross-cutting lint hooks** (optional) — when `agentic_precommit` is `prek`, a `.pre-commit-config.yaml` covering commit messages, JSON, Markdown, and spelling only. No unit tests in prek — tests belong in CI. Language-specific linting stays with whatever template owns the source code.
 - **Shared config** — `.editorconfig`, `.codespellrc`, `commitlint.config.mjs`, and `scripts/doctor.sh` (host-tool checks).
+- **Scheduled template updates** (GitHub forge only) — `.github/workflows/template-update.yml` runs `copier update` weekly and opens a PR when a newer template release exists. See [Automated template updates](#automated-template-updates).
 
 All Copier questions use the `agentic_` prefix so this template can layer without colliding with other templates. Answers are stored in `.copier-answers.agentic.yml` (not Copier's default).
 
@@ -97,6 +98,28 @@ This template only writes files it is configured to own. It does not silently ta
 | Source code, package manifests, language lint hooks | base / layered template |
 
 **Conflict detection** is not enforced inside `copier.yml`. Copier's default update behaviour may produce `.rej` files and still exit zero. CI on this repository runs `copier update` against fixture projects and fails if any `.rej` files exist or the tree is unexpectedly dirty — surfacing collisions (for example both templates touching `.pre-commit-config.yaml`) instead of letting silent rejects rot.
+
+## Automated template updates
+
+On the GitHub forge, generated projects receive `.github/workflows/template-update.yml`. The workflow is self-propagating: update a consuming repo once and it keeps receiving updater changes with every subsequent template release.
+
+What it does:
+
+- **Trigger** — weekly cron plus manual `workflow_dispatch`.
+- **Update** — runs `copier update --defaults --trust --skip-tasks` against the latest template release tag (tasks are skipped because post-render tasks need host tools absent on CI runners).
+- **No changes** — exits clean, no PR.
+- **Changes** — pushes a `chore/template-update-<version>` branch and opens a PR whose body shows the version delta and the release changelog excerpt. If an update PR is already open, the run skips instead of stacking duplicates.
+- **Conflicts** — copier's inline conflict markers are committed as-is; the PR still opens and red lint/CI flags the markers for human/agent resolution on the branch. Updates never silently stall.
+
+### Required setup in consuming repos
+
+The workflow authenticates with a GitHub App installation token (same pattern as a semantic-release bot) instead of the default `GITHUB_TOKEN` — PRs opened with `GITHUB_TOKEN` trigger no CI, which would defeat the conflict-surfacing strategy. Each consuming repo needs:
+
+1. A GitHub App (e.g. your release bot) installed on the repository with **contents: read/write** and **pull requests: read/write** permissions.
+2. A repository (or org) **variable** `RELEASE_BOT_CLIENT_ID` set to the app's client ID.
+3. A repository (or org) **secret** `RELEASE_BOT_PRIVATE_KEY` containing an app private key.
+
+Until these are configured, scheduled runs fail at the token-minting step and do nothing else.
 
 ## Configuration
 
