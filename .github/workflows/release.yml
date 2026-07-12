@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+# One release run at a time, queued (not cancelled) so every push to main
+# is evaluated — cancelling could skip a releasable commit.
+concurrency:
+  group: release
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    # Cut a tag + GitHub Release from conventional commits on main
+    # (see issue #23). This releases the template repo itself so copier
+    # resolves stable version tags instead of HEAD; the rendered template
+    # payload is untouched and stays language-agnostic. semantic-release
+    # runs via npx using Node preinstalled on the runner — no release
+    # tooling is added to the repo's Python project or the template.
+    runs-on: ubuntu-latest
+    name: "Release (semantic-release)"
+    permissions:
+      # Tags and GitHub Releases only; issue/PR comments and labels are
+      # disabled in .releaserc.json, so no issues/pull-requests scopes.
+      contents: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # semantic-release needs full history and tags to find the
+          # previous release and analyze the commits since.
+          fetch-depth: 0
+      - run: npx --yes semantic-release@24
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
