@@ -128,7 +128,13 @@ for tool in "${REQUIRED_TOOLS[@]}"; do
     fi
 done
 
-warn_tool ghx "not installed (deferred; agents use ghx for repo interaction)"
+{% endraw -%}
+{# gh is already a required host tool above; warning on it again would be
+   redundant, so the tracker-CLI warning renders only for ghx/tea. -#}
+{% if agentic_tracker_cli != 'gh' -%}
+warn_tool {{ agentic_tracker_cli }} "not installed (deferred; agents use {{ agentic_tracker_cli }} for repo interaction)"
+{% endif -%}
+{% raw %}
 
 echo
 echo "Summary: $pass ok, $fail required missing"
