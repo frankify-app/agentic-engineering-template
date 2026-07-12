@@ -109,7 +109,11 @@ jobs:
           git -C "$fixture_dir" commit -qm "chore: generated fixture"
 
           # Re-render the agentic layer against the same template state.
+          # Pin --vcs-ref: without it copier resolves the latest release tag,
+          # which on a PR branch ahead of that tag counts as a downgrade from
+          # the ci-conflict-check ref used above, and copier refuses to run.
           uv run copier update --trust --defaults "${data[@]}" \
+            --vcs-ref ci-conflict-check \
             --answers-file .copier-answers.agentic.yml "$fixture_dir"
 
           rejects="$(find "$fixture_dir" -name '*.rej' -print)"
