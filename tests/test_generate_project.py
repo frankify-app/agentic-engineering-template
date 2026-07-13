@@ -153,3 +153,42 @@ def test_claude_settings_put_shims_on_agent_path(
     hook = dst_path / "scripts" / "enable-agent-shims.sh"
     _check_file_contents(hook, ["scripts/agent-shims", "CLAUDE_ENV_FILE"])
     assert hook.stat().st_mode & 0o111, "PATH hook must be executable"
+
+
+def test_github_forge_ships_template_update_workflow(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """GitHub forge: scheduled copier-update workflow rendered verbatim."""
+    dst_path = _render(tmp_path, base_answers, "updater-github")
+
+    _check_file_contents(
+        dst_path / ".github" / "workflows" / "template-update.yml",
+        [
+            "workflow_dispatch",
+            "copier update",
+            "--defaults --trust --skip-tasks",
+            "copier-template-extensions",
+            "actions/create-github-app-token",
+            "RELEASE_BOT_CLIENT_ID",
+            "RELEASE_BOT_PRIVATE_KEY",
+            "chore/template-update-",
+            # GitHub expressions must survive rendering (file is not Jinja).
+            "${{ steps.app-token.outputs.token }}",
+        ],
+    )
+
+
+def test_forgejo_forge_ships_no_github_workflow(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """Forgejo forge: no .github directory — the updater is GitHub-only."""
+    answers = {
+        **base_answers,
+        "agentic_forge": "forgejo",
+        "agentic_forgejo_host": "git.example.com",
+    }
+    dst_path = _render(tmp_path, answers, "updater-forgejo")
+
+    assert not (dst_path / ".github").exists()

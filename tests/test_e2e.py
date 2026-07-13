@@ -35,8 +35,12 @@ COMMON_FILES = frozenset(
     }
 )
 
-EXPECTED_WITH_PREK = COMMON_FILES | {".pre-commit-config.yaml"}
-EXPECTED_WITHOUT_PREK = COMMON_FILES
+# Shipped only on the GitHub forge (the updater authenticates via a GitHub
+# App and drives `gh`; Forgejo repos get no .github directory).
+GITHUB_ONLY_FILES = frozenset({".github/workflows/template-update.yml"})
+
+EXPECTED_WITH_PREK = COMMON_FILES | GITHUB_ONLY_FILES | {".pre-commit-config.yaml"}
+EXPECTED_WITHOUT_PREK = COMMON_FILES | GITHUB_ONLY_FILES
 
 
 def _relative_file_tree(root: Path) -> frozenset[str]:
@@ -127,7 +131,10 @@ def test_e2e_copy_variants_render_clean_tree(
     """Variant answers still render the same owned file set with substituted values."""
     dst_path = render_project(**overrides)
 
-    expected = {path.replace("snake-farm", slug) for path in EXPECTED_WITH_PREK}
+    base = EXPECTED_WITH_PREK
+    if overrides.get("agentic_forge") == "forgejo":
+        base = base - GITHUB_ONLY_FILES
+    expected = {path.replace("snake-farm", slug) for path in base}
     _assert_tree(dst_path, frozenset(expected))
 
     assert repo_url in (dst_path / "AGENTS.md").read_text()
