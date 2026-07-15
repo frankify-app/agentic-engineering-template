@@ -230,6 +230,29 @@ def test_project_kind_docs_omits_code_artifacts(
     }
 
 
+def test_skills_tables_sorted_alphabetically(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """Both skills tables stay alphabetically sorted, as AGENTS.md instructs."""
+    dst_path = _render(tmp_path, base_answers, "skills-sorted")
+
+    content = (dst_path / "AGENTS.md").read_text()
+    skills_section = content.split("## Skills")[1].split("### Repo-Local")[0]
+    tables = [
+        block
+        for block in skills_section.split("\n\n")
+        if block.lstrip().startswith("| Skill")
+    ]
+    assert len(tables) == 2, "expected a universal and a code-specific table"
+    for table in tables:
+        names = [
+            line.split("`")[1] for line in table.splitlines() if line.startswith("| `")
+        ]
+        assert names, f"no skill rows found in table:\n{table}"
+        assert names == sorted(names), f"skills table not sorted: {names}"
+
+
 def test_conventions_file_seeded_once_and_never_overwritten(
     tmp_path: Path,
     base_answers: dict[str, str],
