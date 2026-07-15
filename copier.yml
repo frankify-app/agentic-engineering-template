@@ -104,6 +104,9 @@ agentic_repo_owner:
 # Copier metadata
 _min_copier_version: "9.11.0"
 _subdirectory: template
+# Keep the .claude/skills → ../.agents/skills bridge a symlink in generated
+# repos instead of copying (a copy would be empty — skills install post-render).
+_preserve_symlinks: true
 _answers_file: .copier-answers.agentic.yml
 # Seeded once, never overwritten on `copier update` — rich repo-local rules
 # live there so AGENTS.md updates never conflict with hand-written content.
