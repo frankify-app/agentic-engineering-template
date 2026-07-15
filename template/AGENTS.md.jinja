@@ -9,7 +9,7 @@ Repo: <https://{{ agentic_repo_host }}/{{ agentic_repo_owner }}/{{ agentic_proje
 Ubiquitous language is defined in docs/glossary/. Use
 
 ```bash
-uvx disambiguate <term>
+uvx disambiguate=={{ agentic_disambiguate_version }} <term>
 ```
 
 to get a topologically ordered glossary disambiguating all relevant terms
@@ -18,25 +18,28 @@ to understand the given term.
 Before working on a ticket, run:
 
 ```bash
-uvx disambiguate --from <ticket-file>
+uvx disambiguate=={{ agentic_disambiguate_version }} --from <ticket-file>
 ```
 
 or for GitHub issues:
 
 ```bash
-{{ agentic_tracker_cli }} issue view <number> --json body -q .body | uvx disambiguate --from -
+{{ agentic_tracker_cli }} issue view <number> --json body -q .body | uvx disambiguate=={{ agentic_disambiguate_version }} --from -
 ```
 
 to resolve all referenced terms at once.
+{%- if agentic_project_kind == 'code' %}
 
 ### Architecture
 
 Read [docs/architecture.md](docs/architecture.md) before touching any code.
+{%- endif %}
 
 ## Rules
 
 - Small, single-purpose files
 - Readability over brevity — straightforward, easy-to-follow code. No compact "one-liners" stretching across multiple lines (e.g. nested ternaries). Stretching across multiple lines is only allowed if it aids readability.
+{%- if agentic_project_kind == 'code' %}
 - All routes and non-trivial functions: docstring contracts (params, returns, errors)
 - Test cases cover edge cases and every `@returns` line
 
@@ -46,6 +49,7 @@ Read [docs/architecture.md](docs/architecture.md) before touching any code.
 - Never catch exceptions if they are actual errors that can't be handled
 - Include relevant variable values in error messages, e.g. for JS/TS:
   `"Failed to fetch peers for workspace_id=${workspace_id}: ${e}"`
+{%- endif %}
 
 ## Skills
 
@@ -54,19 +58,30 @@ Live in `.agents/skills/`. Synced using `npx skills update -p -y` — don't edit
 
 **Loading:** Use platform skill tool if available, else read `.agents/skills/<name>/SKILL.md` directly.
 
+Each table is sorted alphabetically by skill — keep it sorted when adding entries.
+
 | Skill                    | Trigger                                                                                            |
 | ------------------------ | -------------------------------------------------------------------------------------------------- |
-| `tdd`                    | Test-driven-development for any implementation                                                     |
-| `documenting-decisions`  | Any implementation task — place `DECISION:` markers                                                |
-| `requesting-code-review` | After completing implementation                                                                    |
 | `caveman`                | Compact wording when writing prose (issues description, PR description, comments on repo or code)  |
+| `documenting-decisions`  | Any implementation task — place `DECISION:` markers                                                |
+| `domain-modeling`        | Pinning down domain terminology (glossary in `docs/glossary/`) or recording decisions in design    |
 | `grill-me`               | User asks to be grilled/interviewed about a plan or design before implementation                   |
 | `grill-with-docs`        | Grilling session that also records ADRs and glossary entries as decisions are made                 |
 | `grilling`               | Core interview loop used by `grill-me`/`grill-with-docs`; also on any 'grill' trigger phrase       |
-| `domain-modeling`        | Pinning down domain terminology (glossary in `docs/glossary/`) or recording decisions in design    |
-| `writing-adrs`           | Recording an architectural decision as an ADR in `docs/adr/`, or when another skill flags one      |
-| `to-tickets`             | Splitting approved work into tracer-bullet issues with blocking edges (reproducible-spec rules)    |
 | `to-spec`                | Turning the current conversation into a spec/PRD and publishing it to the tracker                  |
+| `writing-adrs`           | Recording an architectural decision as an ADR in `docs/adr/`, or when another skill flags one      |
+
+{%- if agentic_project_kind == 'code' %}
+
+Code-specific skills:
+
+| Skill                    | Trigger                                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------------------------- |
+| `requesting-code-review` | After completing implementation                                                                    |
+| `tdd`                    | Test-driven-development for any implementation                                                     |
+| `to-tickets`             | Splitting approved work into tracer-bullet issues with blocking edges (reproducible-spec rules)    |
+
+{%- endif %}
 
 ### Repo-Local Skill Overrides
 
@@ -104,6 +119,7 @@ The modes below are the kinds of work the user will ask for. **Each runs in its 
 - Explore the codebase. Flag `DECISION:SCOPE` when resolving ambiguities. Use the `documenting-decisions` skill (refs: `pre-approval-gate.md`, `scope-interpretation.md`).
 - Write an issue → `{{ agentic_tracker_cli }} issue create`
 - Set issue metadata → `{{ agentic_tracker_cli }} issue edit` (labels/assignees/milestone)
+{%- if agentic_project_kind == 'code' %}
 
 #### Implement
 
@@ -153,3 +169,8 @@ Add packages using the package manager only, never edit requirements/dependencie
 - Document all params, return shapes, and every possible error response
 - Test cases must cover edge cases for inputs and every @returns line in the contract
 - Non-trivial decisions or behavior should be documented via inline comments
+{%- endif %}
+
+## Project Conventions
+
+Repo-specific rules live in [docs/conventions.md](docs/conventions.md). Copier seeds that file once and never overwrites it — put rich local conventions there, not in this template-owned file.

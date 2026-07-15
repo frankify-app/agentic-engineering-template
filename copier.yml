@@ -14,6 +14,24 @@ agentic_project_slug:
   help: "Project slug in kebab-case (repo URL, glossary path). Auto-derived from name; override if needed."
   default: "{{ agentic_project_name | lower | replace(' ', '-') | replace('_', '-') }}"
 
+agentic_project_kind:
+  type: str
+  help: "Repository kind. `code` renders code-specific artifacts (coding rules, code skills, architecture stub); `docs` omits them. Flip the answer and run `copier update` when code lands."
+  choices:
+    - code
+    - docs
+  default: code
+
+agentic_language:
+  type: str
+  help: "Primary content language as an ISO 639-1 code (e.g. en, de). Language-sensitive tooling (codespell) is only rendered for English content."
+  default: en
+
+agentic_disambiguate_version:
+  type: str
+  help: "Pinned disambiguate version (pre-alpha — breaking changes between releases; hook and docs commands use this pin)."
+  default: "0.2.0"
+
 agentic_precommit:
   type: str
   help: "Install cross-cutting prek hooks (commitlint, JSON, Markdown, codespell)?"
@@ -78,6 +96,10 @@ agentic_repo_owner:
 _min_copier_version: "9.11.0"
 _subdirectory: template
 _answers_file: .copier-answers.agentic.yml
+# Seeded once, never overwritten on `copier update` — rich repo-local rules
+# live there so AGENTS.md updates never conflict with hand-written content.
+_skip_if_exists:
+  - docs/conventions.md
 _jinja_extensions:
   - copier_template_extensions.TemplateExtensionLoader
   - extensions/agentic.py:AgenticExtension

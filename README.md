@@ -8,12 +8,12 @@ A [Copier](https://copier.readthedocs.io/) template that overlays agentic-engine
 
 Generated projects receive:
 
-- **Agent docs** — `AGENTS.md` and `CLAUDE.md`, templated with project name, description, slug, and (optionally) forge/repo URL.
-- **Skills** — pinned in `skills-lock.json`; a post-render step runs `npx skills@latest experimental_install` to populate `.agents/skills/`.
-- **Glossary** — `docs/glossary/` with a seed entry for the project itself. Terms are resolved with `uvx disambiguate`.
-- **Architecture stub** — `docs/architecture.md` linking to the project glossary term.
-- **Cross-cutting lint hooks** (optional) — when `agentic_precommit` is `prek`, a `.pre-commit-config.yaml` covering commit messages, JSON, Markdown, and spelling only. No unit tests in prek — tests belong in CI. Language-specific linting stays with whatever template owns the source code.
-- **Shared config** — `.editorconfig`, `.codespellrc`, `commitlint.config.mjs`, and `scripts/doctor.sh` (host-tool checks).
+- **Agent docs** — `AGENTS.md` and `CLAUDE.md`, templated with project name, description, slug, and (optionally) forge/repo URL. `AGENTS.md` keeps a universal core (glossary, skills, git/tracker workflow, style); its coding sections render only when `agentic_project_kind` is `code`. It links to `docs/conventions.md`, a repo-owned file seeded once and never overwritten on `copier update` — rich local rules go there without conflicts.
+- **Skills** — pinned in `skills-lock.json`; a post-render step runs `npx skills@latest experimental_install` to populate `.agents/skills/`. Code-only skills (`tdd`, `requesting-code-review`, `to-tickets`) are included only when `agentic_project_kind` is `code`.
+- **Glossary** — `docs/glossary/` with a seed entry for the project itself. Terms are resolved with `uvx disambiguate==<agentic_disambiguate_version>` (pinned — disambiguate is pre-alpha with breaking changes between releases).
+- **Architecture stub** — `docs/architecture.md` linking to the project glossary term (`agentic_project_kind` is `code` only).
+- **Cross-cutting lint hooks** (optional) — when `agentic_precommit` is `prek`, a `.pre-commit-config.yaml` covering commit messages, JSON, Markdown, glossary lint (pinned `disambiguate --lint` as a local hook — no repo-local `core.hooksPath` setup needed), and — for English content only — spelling. No unit tests in prek — tests belong in CI. Language-specific linting stays with whatever template owns the source code.
+- **Shared config** — `.editorconfig`, `.codespellrc` (English content only), `commitlint.config.mjs`, and `scripts/doctor.sh` (host-tool checks).
 - **Scheduled template updates** (GitHub forge only) — `.github/workflows/template-update.yml` runs `copier update` weekly and opens a PR when a newer template release exists. See [Automated template updates](#automated-template-updates).
 
 All Copier questions use the `agentic_` prefix so this template can layer without colliding with other templates. Answers are stored in `.copier-answers.agentic.yml` (not Copier's default).
@@ -90,6 +90,7 @@ This template only writes files it is configured to own. It does not silently ta
 | File / area | Owner |
 | --- | --- |
 | `AGENTS.md`, `CLAUDE.md` | agentic-template |
+| `docs/conventions.md` | **project** — seeded once by agentic-template, never overwritten (`_skip_if_exists`) |
 | `skills-lock.json`, `.agents/skills/` | agentic-template |
 | `docs/glossary/`, `docs/architecture.md` | agentic-template |
 | `.editorconfig`, `.codespellrc`, `commitlint.config.mjs` | agentic-template |
@@ -130,6 +131,9 @@ Questions asked at generation time (all prefixed `agentic_`):
 | `agentic_project_name` | Human-readable project name (agent docs, glossary). |
 | `agentic_project_description` | Short description (glossary seed entry). |
 | `agentic_project_slug` | Kebab-case slug (paths, repo URL). Auto-derived from `agentic_project_name`; override if needed. |
+| `agentic_project_kind` | `code` or `docs`. Single gate for all code-specific artifacts (AGENTS.md coding sections, code-only skills, `docs/architecture.md`). Flip the answer and run `copier update` when code lands. |
+| `agentic_language` | Primary content language (ISO 639-1, default `en`). codespell renders only for English content; future language-sensitive tooling gates on the same answer. |
+| `agentic_disambiguate_version` | Pinned disambiguate version used by the prek glossary-lint hook and the `uvx disambiguate==…` commands in AGENTS.md. |
 | `agentic_precommit` | `prek` or `none`. |
 | `agentic_forge` | `github`, `forgejo`. Auto-defaults to `github` when the git remote contains `github.com`. |
 | `agentic_forgejo_host` | Forgejo hostname; asked only when `agentic_forge` is `forgejo`. |
