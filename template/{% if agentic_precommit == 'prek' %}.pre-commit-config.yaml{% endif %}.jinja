@@ -45,9 +45,12 @@ repos:
       # Glossary lint, template-owned so repos don't need a colliding
       # core.hooksPath setup. Pinned: disambiguate is pre-alpha and breaks
       # between releases; the pin comes from agentic_disambiguate_version.
+      # Roots come from the agentic_disambiguate_roots answer: prek has no
+      # repo-owned env file to feed DISAMBIGUATE_ROOTS through, so answer
+      # data is the only place roots survive `copier update` unpatched.
       - id: disambiguate-lint
         name: disambiguate --lint
-        entry: uvx disambiguate=={{ agentic_disambiguate_version }} --lint
+        entry: uvx disambiguate=={{ agentic_disambiguate_version }} --lint{% if agentic_disambiguate_roots %} {{ agentic_disambiguate_roots }}{% endif %}
         language: system
         files: ^docs/glossary/
         pass_filenames: false
