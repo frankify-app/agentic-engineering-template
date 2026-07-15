@@ -25,6 +25,7 @@ COMMON_FILES = frozenset(
         "CLAUDE.md",
         "commitlint.config.mjs",
         "docs/architecture.md",
+        "docs/conventions.md",
         "docs/glossary/.markdownlint-cli2.yaml",
         "docs/glossary/snake-farm.md",
         "scripts/agent-shims/gh",
@@ -75,6 +76,7 @@ def test_e2e_copy_defaults_renders_expected_tree(
     assert "check-json" in precommit
     assert "markdownlint-cli2" in precommit
     assert "codespell" in precommit
+    assert "disambiguate==" in precommit
     assert "commitizen" not in precommit
 
     answers = (dst_path / ".copier-answers.agentic.yml").read_text()
@@ -139,6 +141,28 @@ def test_e2e_copy_variants_render_clean_tree(
 
     assert repo_url in (dst_path / "AGENTS.md").read_text()
     assert (dst_path / "docs" / "glossary" / f"{slug}.md").exists()
+
+
+def test_e2e_copy_docs_kind_omits_code_artifacts(
+    render_project: Callable[..., Path],
+) -> None:
+    """``agentic_project_kind=docs`` drops the architecture stub, nothing else."""
+    dst_path = render_project(agentic_project_kind="docs")
+
+    _assert_tree(dst_path, frozenset(EXPECTED_WITH_PREK - {"docs/architecture.md"}))
+
+
+def test_e2e_copy_non_english_omits_codespell(
+    render_project: Callable[..., Path],
+) -> None:
+    """``agentic_language=de`` drops codespell config and hook, keeps the rest."""
+    dst_path = render_project(agentic_language="de")
+
+    _assert_tree(dst_path, frozenset(EXPECTED_WITH_PREK - {".codespellrc"}))
+
+    precommit = (dst_path / ".pre-commit-config.yaml").read_text()
+    assert "codespell" not in precommit
+    assert "disambiguate==" in precommit
 
 
 # Host tools the post-render _tasks invoke. Missing any → skip the smoke test

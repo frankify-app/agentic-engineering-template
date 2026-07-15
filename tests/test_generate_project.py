@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import json
 from pathlib import Path
 
 import copier
@@ -153,6 +154,146 @@ def test_claude_settings_put_shims_on_agent_path(
     hook = dst_path / "scripts" / "enable-agent-shims.sh"
     _check_file_contents(hook, ["scripts/agent-shims", "CLAUDE_ENV_FILE"])
     assert hook.stat().st_mode & 0o111, "PATH hook must be executable"
+
+
+def test_project_kind_code_renders_code_artifacts(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """Default kind (code): coding rules, code skills, and architecture stub."""
+    dst_path = _render(tmp_path, base_answers, "kind-code")
+
+    _check_file_contents(
+        dst_path / "AGENTS.md",
+        [
+            "Read [docs/architecture.md](docs/architecture.md)",
+            "### Errors",
+            "docstring contracts",
+            "#### Implement",
+            "#### Review",
+            "#### Apply Review Comments",
+            "## Documentation",
+            "| `tdd` ",
+            "| `requesting-code-review` ",
+            "| `to-tickets` ",
+        ],
+    )
+    assert (dst_path / "docs" / "architecture.md").exists()
+    _check_file_contents(
+        dst_path / "skills-lock.json",
+        ['"tdd"', '"requesting-code-review"', '"to-tickets"'],
+    )
+
+
+def test_project_kind_docs_omits_code_artifacts(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """docs kind: no coding sections, no code skills, no architecture stub."""
+    answers = {**base_answers, "agentic_project_kind": "docs"}
+    dst_path = _render(tmp_path, answers, "kind-docs")
+
+    _check_file_contents(
+        dst_path / "AGENTS.md",
+        [
+            # Universal core survives the gate.
+            "uvx disambiguate==",
+            "#### Plan",
+            "docs/conventions.md",
+            "| `documenting-decisions` ",
+            "| `to-spec` ",
+        ],
+        unexpect_strs=[
+            "docs/architecture.md",
+            "### Errors",
+            "docstring contracts",
+            "#### Implement",
+            "#### Review",
+            "## Documentation",
+            "`tdd`",
+            "`requesting-code-review`",
+            "`to-tickets`",
+        ],
+    )
+    assert not (dst_path / "docs" / "architecture.md").exists()
+
+    lock = json.loads((dst_path / "skills-lock.json").read_text())
+    assert set(lock["skills"]) == {
+        "caveman",
+        "documenting-decisions",
+        "domain-modeling",
+        "grill-me",
+        "grill-with-docs",
+        "grilling",
+        "to-spec",
+        "writing-adrs",
+    }
+
+
+def test_conventions_file_seeded_once_and_never_overwritten(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """docs/conventions.md is seeded, then left alone on re-render."""
+    dst_path = _render(tmp_path, base_answers, "conventions")
+
+    conventions = dst_path / "docs" / "conventions.md"
+    _check_file_contents(conventions, ["Snake Farm — Project Conventions"])
+
+    conventions.write_text("# Hand-written vault rules\n")
+    copier.run_copy(
+        src_path=str(PROJECT_ROOT),
+        dst_path=dst_path,
+        data=base_answers,
+        defaults=True,
+        unsafe=True,
+        skip_tasks=True,
+        overwrite=True,
+    )
+    assert conventions.read_text() == "# Hand-written vault rules\n"
+
+
+def test_language_non_english_omits_codespell(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """Non-English content: no codespell hook, no .codespellrc."""
+    answers = {**base_answers, "agentic_language": "de"}
+    dst_path = _render(tmp_path, answers, "lang-de")
+
+    assert not (dst_path / ".codespellrc").exists()
+    _check_file_contents(
+        dst_path / ".pre-commit-config.yaml",
+        ["disambiguate-lint"],
+        unexpect_strs=["codespell"],
+    )
+    _check_file_contents(
+        dst_path / ".copier-answers.agentic.yml",
+        ["agentic_language: de"],
+    )
+
+
+def test_disambiguate_version_pins_hook_and_docs_commands(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """The pinned disambiguate version flows into AGENTS.md and the prek hook."""
+    answers = {**base_answers, "agentic_disambiguate_version": "0.9.9"}
+    dst_path = _render(tmp_path, answers, "disambiguate-pin")
+
+    _check_file_contents(
+        dst_path / "AGENTS.md",
+        ["uvx disambiguate==0.9.9"],
+        unexpect_strs=["uvx disambiguate <term>", "uvx disambiguate --from"],
+    )
+    _check_file_contents(
+        dst_path / ".pre-commit-config.yaml",
+        [
+            "disambiguate-lint",
+            "entry: uvx disambiguate==0.9.9 --lint",
+            "files: ^docs/glossary/",
+        ],
+    )
 
 
 def test_github_forge_ships_template_update_workflow(

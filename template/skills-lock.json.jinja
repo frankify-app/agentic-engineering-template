@@ -37,6 +37,7 @@
       "skillPath": "skills/productivity/grilling/SKILL.md",
       "computedHash": "1de9e777a60b184b29412fadacb7bbde8c14bb7037e5c4d9d086c941281d1742"
     },
+{%- if agentic_project_kind == 'code' %}
     "requesting-code-review": {
       "source": "obra/superpowers",
       "sourceType": "github",
@@ -49,18 +50,21 @@
       "skillPath": "derived/tdd/SKILL.md",
       "computedHash": "b663ec89bd4d0babc7572eb39ce21fe56a95c6da9d74149a17ce93b7c4906253"
     },
+{%- endif %}
     "to-spec": {
       "source": "frankify-app/skills",
       "sourceType": "github",
       "skillPath": "derived/to-spec/SKILL.md",
       "computedHash": "11bace9728fd91873b01ea743694226544907a8983a90b6e327324a41e062b0f"
     },
+{%- if agentic_project_kind == 'code' %}
     "to-tickets": {
       "source": "frankify-app/skills",
       "sourceType": "github",
       "skillPath": "derived/to-tickets/SKILL.md",
       "computedHash": "9c58978e2d01e2eacd7616722158b1d1dc409521b1ee1f443420cecb6b2d6cc0"
     },
+{%- endif %}
     "writing-adrs": {
       "source": "frankify-app/skills",
       "sourceType": "github",
