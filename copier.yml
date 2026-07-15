@@ -32,6 +32,15 @@ agentic_disambiguate_version:
   help: "Pinned disambiguate version (pre-alpha — breaking changes between releases; hook and docs commands use this pin)."
   default: "0.2.0"
 
+agentic_disambiguate_roots:
+  type: str
+  help: >-
+    Extra arguments appended to the `disambiguate --lint` hook entry
+    (e.g. "docs/glossary/ --roots docs/conventions.md 'docs/notes/*.md'").
+    Empty keeps disambiguate's default roots. Kept as answer data so repos
+    never patch the template-owned .pre-commit-config.yaml.
+  default: ""
+
 agentic_precommit:
   type: str
   help: "Install cross-cutting prek hooks (commitlint, JSON, Markdown, codespell)?"

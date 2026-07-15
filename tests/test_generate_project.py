@@ -319,6 +319,43 @@ def test_disambiguate_version_pins_hook_and_docs_commands(
     )
 
 
+def test_disambiguate_roots_default_renders_bare_lint(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """Empty roots answer (default): hook entry stays bare `--lint`."""
+    dst_path = _render(tmp_path, base_answers, "disambiguate-roots-default")
+
+    precommit = (dst_path / ".pre-commit-config.yaml").read_text()
+    entry_lines = [
+        line for line in precommit.splitlines() if "entry: uvx disambiguate" in line
+    ]
+    assert len(entry_lines) == 1, f"Expected one disambiguate entry: {entry_lines}"
+    assert entry_lines[0].endswith("--lint"), (
+        f"Default must render bare --lint, got: {entry_lines[0]!r}"
+    )
+
+
+def test_disambiguate_roots_answer_appends_lint_args(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """A roots answer is appended verbatim to the hook's `--lint` entry."""
+    roots = "docs/glossary/ --roots docs/conventions.md 'docs/notes/*.md'"
+    answers = {**base_answers, "agentic_disambiguate_roots": roots}
+    dst_path = _render(tmp_path, answers, "disambiguate-roots")
+
+    _check_file_contents(
+        dst_path / ".pre-commit-config.yaml",
+        [f"--lint {roots}"],
+    )
+    # Roots survive `copier update` as data in the answers file.
+    _check_file_contents(
+        dst_path / ".copier-answers.agentic.yml",
+        ["agentic_disambiguate_roots:"],
+    )
+
+
 def test_github_forge_ships_template_update_workflow(
     tmp_path: Path,
     base_answers: dict[str, str],
