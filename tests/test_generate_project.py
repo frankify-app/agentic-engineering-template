@@ -156,6 +156,28 @@ def test_claude_settings_put_shims_on_agent_path(
     assert hook.stat().st_mode & 0o111, "PATH hook must be executable"
 
 
+def test_claude_skills_symlink_bridges_agents_skills(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """Claude Code loads skills from .claude/skills — shipped as a symlink so
+    .agents/skills stays the single canonical location."""
+    dst_path = _render(tmp_path, base_answers, "skills-bridge")
+
+    link = dst_path / ".claude" / "skills"
+    assert link.is_symlink(), ".claude/skills must be a symlink, not a copy"
+    assert link.readlink() == Path("../.agents/skills")
+
+    # Lint configs must exclude the bridged dir, else skill files get linted
+    # through the symlink.
+    _check_file_contents(
+        dst_path / ".markdownlint-cli2.yaml", [".claude/skills/**"]
+    )
+    _check_file_contents(
+        dst_path / ".pre-commit-config.yaml", ["\\.claude/skills"]
+    )
+
+
 def test_project_kind_code_renders_code_artifacts(
     tmp_path: Path,
     base_answers: dict[str, str],

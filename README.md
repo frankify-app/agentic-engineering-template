@@ -9,7 +9,7 @@ A [Copier](https://copier.readthedocs.io/) template that overlays agentic-engine
 Generated projects receive:
 
 - **Agent docs** — `AGENTS.md` and `CLAUDE.md`, templated with project name, description, slug, and (optionally) forge/repo URL. `AGENTS.md` keeps a universal core (glossary, skills, git/tracker workflow, style); its coding sections render only when `agentic_project_kind` is `code`. It links to `docs/conventions.md`, a repo-owned file seeded once and never overwritten on `copier update` — rich local rules go there without conflicts.
-- **Skills** — pinned in `skills-lock.json`; a post-render step runs `npx skills@latest experimental_install` to populate `.agents/skills/`. Code-only skills (`tdd`, `requesting-code-review`, `to-tickets`) are included only when `agentic_project_kind` is `code`.
+- **Skills** — pinned in `skills-lock.json`; a post-render step runs `npx skills@latest experimental_install` to populate `.agents/skills/`. Code-only skills (`tdd`, `requesting-code-review`, `to-tickets`) are included only when `agentic_project_kind` is `code`. `.claude/skills` is shipped as a symlink to `.agents/skills` so Claude Code registers the installed skills as platform skills / slash commands (`experimental_install` doesn't propagate into per-agent directories on lockfile restore). Windows note: git symlinks need `core.symlinks=true` plus developer mode.
 - **Glossary** — `docs/glossary/` with a seed entry for the project itself. Terms are resolved with `uvx disambiguate==<agentic_disambiguate_version>` (pinned — disambiguate is pre-alpha with breaking changes between releases).
 - **Architecture stub** — `docs/architecture.md` linking to the project glossary term (`agentic_project_kind` is `code` only).
 - **Cross-cutting lint hooks** (optional) — when `agentic_precommit` is `prek`, a `.pre-commit-config.yaml` covering commit messages, JSON, Markdown, glossary lint (pinned `disambiguate --lint` as a local hook — no repo-local `core.hooksPath` setup needed; lint roots are configurable via the `agentic_disambiguate_roots` answer so repos never patch the rendered hook), and — for English content only — spelling. No unit tests in prek — tests belong in CI. Language-specific linting stays with whatever template owns the source code.
@@ -91,7 +91,7 @@ This template only writes files it is configured to own. It does not silently ta
 | --- | --- |
 | `AGENTS.md`, `CLAUDE.md` | agentic-template |
 | `docs/conventions.md` | **project** — seeded once by agentic-template, never overwritten (`_skip_if_exists`) |
-| `skills-lock.json`, `.agents/skills/` | agentic-template |
+| `skills-lock.json`, `.agents/skills/`, `.claude/skills` (symlink) | agentic-template |
 | `docs/glossary/`, `docs/architecture.md` | agentic-template |
 | `.editorconfig`, `.codespellrc`, `commitlint.config.mjs` | agentic-template |
 | `scripts/doctor.sh` | agentic-template |
