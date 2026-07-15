@@ -170,12 +170,8 @@ def test_claude_skills_symlink_bridges_agents_skills(
 
     # Lint configs must exclude the bridged dir, else skill files get linted
     # through the symlink.
-    _check_file_contents(
-        dst_path / ".markdownlint-cli2.yaml", [".claude/skills/**"]
-    )
-    _check_file_contents(
-        dst_path / ".pre-commit-config.yaml", ["\\.claude/skills"]
-    )
+    _check_file_contents(dst_path / ".markdownlint-cli2.yaml", [".claude/skills/**"])
+    _check_file_contents(dst_path / ".pre-commit-config.yaml", ["\\.claude/skills"])
 
 
 def test_project_kind_code_renders_code_artifacts(
