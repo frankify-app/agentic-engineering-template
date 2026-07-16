@@ -463,3 +463,42 @@ def test_copier_has_no_decision_memory_question() -> None:
     """The template must never ask for the decision-memory URL at init time."""
     copier_yml = (PROJECT_ROOT / "copier.yml").read_text()
     assert "decision_memory" not in copier_yml
+
+
+def test_github_forge_ships_lint_workflow_with_prek_job(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """GitHub forge + prek: lint workflow with marker check and prek jobs."""
+    dst_path = _render(tmp_path, base_answers, "lint-github-prek")
+
+    _check_file_contents(
+        dst_path / ".github" / "workflows" / "lint.yml",
+        [
+            "pull_request",
+            "cancel-in-progress: true",
+            "git grep -nE",
+            "::error::",
+            ":!.agents/skills",
+            "uvx prek run --all-files --show-diff-on-failure",
+            "astral-sh/setup-uv",
+            # GitHub expressions must survive Jinja rendering.
+            "${{ github.ref }}",
+        ],
+    )
+
+
+def test_lint_workflow_without_prek_keeps_marker_check(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """agentic_precommit=none: marker check stays (guards the updater
+    contract), the prek job is omitted."""
+    answers = {**base_answers, "agentic_precommit": "none"}
+    dst_path = _render(tmp_path, answers, "lint-github-none")
+
+    _check_file_contents(
+        dst_path / ".github" / "workflows" / "lint.yml",
+        ["git grep -nE", "::error::"],
+        unexpect_strs=["prek"],
+    )

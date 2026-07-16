@@ -38,7 +38,12 @@ COMMON_FILES = frozenset(
 
 # Shipped only on the GitHub forge (the updater authenticates via a GitHub
 # App and drives `gh`; Forgejo repos get no .github directory).
-GITHUB_ONLY_FILES = frozenset({".github/workflows/template-update.yml"})
+GITHUB_ONLY_FILES = frozenset(
+    {
+        ".github/workflows/template-update.yml",
+        ".github/workflows/lint.yml",
+    }
+)
 
 EXPECTED_WITH_PREK = COMMON_FILES | GITHUB_ONLY_FILES | {".pre-commit-config.yaml"}
 EXPECTED_WITHOUT_PREK = COMMON_FILES | GITHUB_ONLY_FILES
