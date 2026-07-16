@@ -411,3 +411,55 @@ def test_forgejo_forge_ships_no_github_workflow(
     dst_path = _render(tmp_path, answers, "updater-forgejo")
 
     assert not (dst_path / ".github").exists()
+
+
+def test_grilling_pinned_to_frankify_derivation(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """`grilling` pins the frankify-app/skills derivation, not upstream."""
+    dst_path = _render(tmp_path, base_answers, "grilling-pin")
+
+    lock = json.loads((dst_path / "skills-lock.json").read_text())
+    grilling = lock["skills"]["grilling"]
+    assert grilling["source"] == "frankify-app/skills"
+    assert grilling["skillPath"] == "derived/grilling/SKILL.md"
+
+
+def test_decision_memory_repo_env_var_contract(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """DECISION_MEMORY_REPO is an env-var-only contract: no copier question,
+    no value in any committed artifact (.copier-answers* included); AGENTS.md
+    documents the contract and doctor.sh checks the env var."""
+    # Even if a consumer passes a URL as copier data, it must render nowhere.
+    stray_url = "https://github.com/acme/decision-memory"
+    answers = {**base_answers, "agentic_decision_memory_repo": stray_url}
+    dst_path = _render(tmp_path, answers, "decision-memory")
+
+    for path in dst_path.rglob("*"):
+        if path.is_file():
+            assert stray_url not in path.read_text(), (
+                f"DECISION_MEMORY_REPO value leaked into {path}"
+            )
+
+    # Not an init-time answer: no question, so nothing recorded on update.
+    _check_file_contents(
+        dst_path / ".copier-answers.agentic.yml",
+        unexpect_strs=["decision_memory"],
+    )
+    _check_file_contents(
+        dst_path / "AGENTS.md",
+        ["DECISION_MEMORY_REPO", "skips recording"],
+    )
+    _check_file_contents(
+        dst_path / "scripts" / "doctor.sh",
+        ["DECISION_MEMORY_REPO", 'git ls-remote "$DECISION_MEMORY_REPO"'],
+    )
+
+
+def test_copier_has_no_decision_memory_question() -> None:
+    """The template must never ask for the decision-memory URL at init time."""
+    copier_yml = (PROJECT_ROOT / "copier.yml").read_text()
+    assert "decision_memory" not in copier_yml
