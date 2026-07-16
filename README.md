@@ -15,6 +15,7 @@ Generated projects receive:
 - **Cross-cutting lint hooks** (optional) — when `agentic_precommit` is `prek`, a `.pre-commit-config.yaml` covering commit messages, JSON, Markdown, glossary lint (pinned `disambiguate --lint` as a local hook — no repo-local `core.hooksPath` setup needed; lint roots are configurable via the `agentic_disambiguate_roots` answer so repos never patch the rendered hook), and — for English content only — spelling. No unit tests in prek — tests belong in CI. Language-specific linting stays with whatever template owns the source code.
 - **Shared config** — `.editorconfig`, `.codespellrc` (English content only), `commitlint.config.mjs`, and `scripts/doctor.sh` (host-tool checks).
 - **Scheduled template updates** (GitHub forge only) — `.github/workflows/template-update.yml` runs `copier update` weekly and opens a PR when a newer template release exists. See [Automated template updates](#automated-template-updates).
+- **Lint CI** (GitHub forge only) — `.github/workflows/lint.yml` fails on committed copier conflict markers (always rendered, even with `agentic_precommit` set to `none` — it guards the updater contract) and, when `agentic_precommit` is `prek`, runs all prek hooks over all files. CI evaluates the tree at PR HEAD while prek runs per commit locally, so the workflow complements the local hooks rather than replacing them — intermediate commits (e.g. TDD red-step commits) stay lintable locally without blocking the PR.
 
 All Copier questions use the `agentic_` prefix so this template can layer without colliding with other templates. Answers are stored in `.copier-answers.agentic.yml` (not Copier's default).
 
@@ -95,6 +96,7 @@ This template only writes files it is configured to own. It does not silently ta
 | `docs/glossary/`, `docs/architecture.md` | agentic-template |
 | `.editorconfig`, `.codespellrc`, `commitlint.config.mjs` | agentic-template |
 | `scripts/doctor.sh` | agentic-template |
+| `.github/workflows/template-update.yml`, `.github/workflows/lint.yml` | agentic-template (GitHub forge only) |
 | `.pre-commit-config.yaml` | agentic-template **only** when `agentic_precommit` is `prek`; otherwise not written |
 | Source code, package manifests, language lint hooks | base / layered template |
 
