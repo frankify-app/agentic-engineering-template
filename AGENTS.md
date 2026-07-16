@@ -9,7 +9,7 @@ Repo: <https://github.com/frankify-app/agentic-engineering-template>
 Ubiquitous language is defined in docs/glossary/. Use
 
 ```bash
-uvx disambiguate <term>
+uvx disambiguate==0.2.0 <term>
 ```
 
 to get a topologically ordered glossary disambiguating all relevant terms
@@ -18,13 +18,13 @@ to understand the given term.
 Before working on a ticket, run:
 
 ```bash
-uvx disambiguate --from <ticket-file>
+uvx disambiguate==0.2.0 --from <ticket-file>
 ```
 
 or for GitHub issues:
 
 ```bash
-ghx issue view <number> --json body -q .body | uvx disambiguate --from -
+ghx issue view <number> --json body -q .body | uvx disambiguate==0.2.0 --from -
 ```
 
 to resolve all referenced terms at once.
@@ -54,23 +54,34 @@ Live in `.agents/skills/`. Synced using `npx skills update -p -y` — don't edit
 
 **Loading:** Use platform skill tool if available, else read `.agents/skills/<name>/SKILL.md` directly.
 
+Each table is sorted alphabetically by skill — keep it sorted when adding entries.
+
 | Skill                    | Trigger                                                                                            |
 | ------------------------ | -------------------------------------------------------------------------------------------------- |
-| `tdd`                    | Test-driven-development for any implementation                                                     |
-| `documenting-decisions`  | Any implementation task — place `DECISION:` markers                                                |
-| `requesting-code-review` | After completing implementation                                                                    |
 | `caveman`                | Compact wording when writing prose (issues description, PR description, comments on repo or code)  |
+| `documenting-decisions`  | Any implementation task — place `DECISION:` markers                                                |
+| `domain-modeling`        | Pinning down domain terminology (glossary in `docs/glossary/`) or recording decisions in design    |
 | `grill-me`               | User asks to be grilled/interviewed about a plan or design before implementation                   |
 | `grill-with-docs`        | Grilling session that also records ADRs and glossary entries as decisions are made                 |
 | `grilling`               | Core interview loop used by `grill-me`/`grill-with-docs`; also on any 'grill' trigger phrase       |
-| `domain-modeling`        | Pinning down domain terminology (glossary in `docs/glossary/`) or recording decisions in design    |
-| `writing-adrs`           | Recording an architectural decision as an ADR in `docs/adr/`, or when another skill flags one      |
-| `to-tickets`             | Splitting approved work into tracer-bullet issues with blocking edges (reproducible-spec rules)    |
 | `to-spec`                | Turning the current conversation into a spec/PRD and publishing it to the tracker                  |
+| `writing-adrs`           | Recording an architectural decision as an ADR in `docs/adr/`, or when another skill flags one      |
+
+Code-specific skills:
+
+| Skill                    | Trigger                                                                                            |
+| ------------------------ | -------------------------------------------------------------------------------------------------- |
+| `requesting-code-review` | After completing implementation                                                                    |
+| `tdd`                    | Test-driven-development for any implementation                                                     |
+| `to-tickets`             | Splitting approved work into tracer-bullet issues with blocking edges (reproducible-spec rules)    |
 
 ### Repo-Local Skill Overrides
 
-- `grilling`: present each question via the platform's multiple-choice dialog (e.g. `AskUserQuestion` in Claude Code) when the platform supports one; fall back to plain-text questions otherwise.
+- `grilling`: present questions via the platform's native question dialog (e.g. `AskUserQuestion` in Claude Code) when the platform provides one; fall back to plain text otherwise. (The multiple-choice question format itself is part of the skill — this override only covers presentation.)
+
+### Skill Environment Variables
+
+- `DECISION_MEMORY_REPO` — URL of the decision-memory repo the `grilling` skill records decisions to. Recording requires this env var in the agent's execution environment; the skill reads exactly this name (shared contract with the skill — renaming either side breaks recording silently). Never hardcode, commit, or echo the value into artifacts. Unset → grilling still works, skips recording, and says so. Where to set it: local sessions → shell profile / user-level agent settings; remote or cloud sessions → the environment's configuration; CI → a repository secret. `scripts/doctor.sh` warns when it's unset and checks reachability when set.
 
 ## Git
 
@@ -82,15 +93,15 @@ Live in `.agents/skills/`. Synced using `npx skills update -p -y` — don't edit
 
 ### Agentic Engineering Workflow
 
-Use `ghx` for all repository interaction. `gh` and `tea` are disabled — calling them tells you to use `ghx` instead.
-
-`ghx` exposes a curated subset of `gh`'s verbs (plus a few additions, e.g. `--code-comment`) and presents the **same `gh`-style interface against both GitHub and Forgejo**, so you never need to know which host the repo is on. It is **not** a full `gh` replacement: it has only the verbs listed below. If a command isn't in this list, `ghx` doesn't have it — don't fall back to `gh`/`tea`.
+Use `ghx` for all repository interaction. `gh` and `tea` are disabled — calling them tells you to use `ghx` instead (enforced via shims in `scripts/agent-shims/`, on PATH in agent sessions only; tracker access through MCP tools is not gated by the shims).
 
 #### Available `ghx` verbs
 
 - **issues:** `issue create`, `issue view` (`--comments`), `issue list`, `issue comment`, `issue edit`
 - **pull requests:** `pr create`, `pr view` (`--comments`), `pr list`, `pr comment`, `pr edit`, `pr review` (`--body`, repeatable `--code-comment path:line:text`), `pr checks`, `pr status`
 - **CI:** `run list`, `run view`
+
+`ghx` exposes a curated subset of `gh`'s verbs (plus a few additions, e.g. `--code-comment`) and presents the **same `gh`-style interface against both GitHub and Forgejo**, so you never need to know which host the repo is on. It is **not** a full `gh` replacement: it has only the verbs listed above. If a command isn't in that list, `ghx` doesn't have it — don't fall back to `gh`/`tea`.
 
 Use `run list` / `run view` for workflow-run detail; use `pr checks` / `pr status` for a PR's check rollup.
 
@@ -148,3 +159,7 @@ Add packages using the package manager only, never edit requirements/dependencie
 - Document all params, return shapes, and every possible error response
 - Test cases must cover edge cases for inputs and every @returns line in the contract
 - Non-trivial decisions or behavior should be documented via inline comments
+
+## Project Conventions
+
+Repo-specific rules live in [docs/conventions.md](docs/conventions.md). Copier seeds that file once and never overwrites it — put rich local conventions there, not in this template-owned file.
