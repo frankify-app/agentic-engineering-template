@@ -91,24 +91,38 @@ Code-specific skills:
 - Commits: conventional commits
 - Document unexpected encounters and design decisions in commit message as well as PR/Issue
 
-### Tracker Placeholder Syntax
+### Tracker Content Formatting
 
-Tracker APIs and sanitizers silently strip angle-bracket tokens as HTML,
-so `<placeholder>` syntax corrupts issue/PR bodies on programmatic reads
-and edits.
+Tracker bodies (issue bodies, PR descriptions, comments) do NOT render
+like committed `.md` files: APIs/sanitizers silently strip angle-bracket
+tokens as HTML, and single newlines render as hard line breaks rather
+than collapsing as in standard Markdown. Both silently corrupt
+tracker-posted content. The rules below cover tracker-posted content
+only — files committed to the repo (like this one) keep angle brackets
+and normal hard-wrapping.
 
-- In ALL content posted to the tracker (issue bodies, PR descriptions,
-  comments), write placeholders with guillemets: `«` and `»` — e.g.
-  `decisions/«id».json`, `«timestamp»-«slug»`. Never `<placeholder>`.
-  (Angle brackets remain fine in files committed to the repo, like this
-  one — the rule covers tracker-posted content only.)
-- If an EXISTING ticket is found using `<...>` placeholders, ask the
-  user whether it should be fixed (converted to `«…»`) — don't rewrite
-  it unprompted.
-- If such placeholders occur in content you are about to post anyway as
-  a normal message (no explicit edit of an existing ticket needed —
-  e.g. a new ticket, comment, or quoted text), fix them to `«…»`
-  proactively and tell the user you did.
+Placeholder syntax:
+
+- In ALL tracker-posted content, write placeholders with guillemets:
+  `«` and `»` — e.g. `decisions/«id».json`, `«timestamp»-«slug»`.
+  Never `<placeholder>` — it is stripped on programmatic reads and
+  edits.
+
+Line wrapping:
+
+- Never hard-wrap tracker-posted markdown. Write one paragraph or list
+  item per line and let the renderer wrap; a fixed-column wrap breaks
+  the rendered text at random places, because each single newline
+  becomes a hard break.
+
+Repairing violations (applies to both rules):
+
+- If an EXISTING ticket violates them, ask the user whether it should
+  be fixed — don't rewrite it unprompted.
+- If a violation occurs in content you are about to post anyway as a
+  normal message (no explicit edit of an existing ticket needed — e.g.
+  a new ticket, comment, or quoted text), fix it proactively and tell
+  the user you did.
 
 ### Agentic Engineering Workflow
 
