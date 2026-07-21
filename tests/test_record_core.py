@@ -57,6 +57,7 @@ def draft() -> dict:
                 "option": "full-access PAT",
                 "reason": "blast radius",
                 "status": "presumed-false",
+                "reason_source": "inferred",
                 "reason_class": "TBD",
             }
         ],

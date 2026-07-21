@@ -44,8 +44,13 @@ REQUIRED_FIELDS = (
 PREDICTION_ROLES = frozenset({"prediction", "prediction+recommendation"})
 OPTION_ROLES = PREDICTION_ROLES | frozenset({"recommendation", "wildcard"})
 PREDICTION_STREAMS = frozenset({"preference-driven", "cold"})
-OUTCOMES = frozenset({"hit", "miss", "near-tie"})
+OUTCOMES = frozenset({"hit", "miss", "near-tie", "refined"})
 REJECTION_STATUSES = frozenset({"operative", "presumed-false"})
+# Reason provenance for presumed-false rejections: the model records
+# the most-likely reason and DECLARES where it came from; a null
+# reason is only valid when explicitly declared "none" — never a lazy
+# default.
+PRESUMED_REASON_SOURCES = frozenset({"if_clause", "inferred", "none"})
 
 MAX_SLUG_LENGTH = 40
 ID_RE = re.compile(r"^(\d{8}T\d{6}Z)-([a-z0-9]+(?:-[a-z0-9]+)*)$")
@@ -176,12 +181,14 @@ def _validate_ruling(
     if outcome not in OUTCOMES:
         errors.append(f"outcome: {outcome!r} not in {sorted(OUTCOMES)}")
     elif (
-        outcome != "near-tie"
+        outcome in ("hit", "miss")
         and prediction_option is not None
         and chosen_slot is not None
     ):
-        # Scored outcomes must match the slots; near-ties are exempt by
-        # design (never scored as misses).
+        # Scored outcomes must match the slots. Near-ties are exempt by
+        # design (never scored as misses); 'refined' means the chosen
+        # answer CONTAINS the prediction plus an extension, so the slot
+        # differs without the prediction being wrong.
         hit = chosen_slot == prediction_option.get("slot")
         if outcome == "hit" and not hit:
             errors.append(
@@ -219,15 +226,48 @@ def _validate_ruling(
             if not isinstance(rejection, dict):
                 errors.append(f"rejections[{i}]: must be an object")
                 continue
-            for key in ("option", "reason"):
-                if not isinstance(rejection.get(key), str) or not rejection[key]:
-                    errors.append(f"rejections[{i}].{key}: must be a non-empty string")
+            if not isinstance(rejection.get("option"), str) or not rejection["option"]:
+                errors.append(f"rejections[{i}].option: must be a non-empty string")
             status = rejection.get("status")
             if status not in REJECTION_STATUSES:
                 errors.append(
                     f"rejections[{i}].status: {status!r} not in "
                     f"{sorted(REJECTION_STATUSES)}"
                 )
+                continue
+            reason = rejection.get("reason")
+            source = rejection.get("reason_source")
+            if status == "operative":
+                # Operative reasons are decider-stated by definition.
+                if source not in (None, "stated"):
+                    errors.append(
+                        f"rejections[{i}].reason_source: {source!r} — "
+                        "operative rejections are stated by definition"
+                    )
+                if not isinstance(reason, str) or not reason:
+                    errors.append(
+                        f"rejections[{i}].reason: operative rejections "
+                        "require the stated reason, verbatim"
+                    )
+            else:  # presumed-false
+                if source not in PRESUMED_REASON_SOURCES:
+                    errors.append(
+                        f"rejections[{i}].reason_source: {source!r} not in "
+                        f"{sorted(PRESUMED_REASON_SOURCES)} (required for "
+                        "presumed-false rejections)"
+                    )
+                elif source == "none":
+                    if reason is not None:
+                        errors.append(
+                            f"rejections[{i}].reason: must be null when "
+                            "reason_source is 'none'"
+                        )
+                elif not isinstance(reason, str) or not reason:
+                    errors.append(
+                        f"rejections[{i}].reason: must be a non-empty "
+                        f"string when reason_source is {source!r} (declare "
+                        "reason_source 'none' if nothing is inferable)"
+                    )
 
 
 def _validate_optional_fields(record: dict, errors: list[str]) -> None:

@@ -69,7 +69,8 @@ Example (a real record):
      "status": "operative", "reason_class": "TBD"},
     {"option": "full-access direct push",
      "reason": "agent could silently rewrite preference history",
-     "status": "presumed-false", "reason_class": "TBD"}
+     "status": "presumed-false", "reason_source": "inferred",
+     "reason_class": "TBD"}
   ],
   "outcome": "miss",
   "drill_down_of": null,
@@ -117,7 +118,10 @@ everywhere — new optional fields need no migration.
   provenance defects).
 - `artifact_ref`: REQUIRED when an artifact exists — repo-relative
   path + commit SHA (content-addressed, survives rewrites) + anchor
-  when possible. Null only if genuinely no artifact.
+  when possible. Null only if genuinely no artifact. Chat-extracted
+  drafts carry null refs by design (never guess SHAs); enrich them in
+  the drafts file at ingestion time, once the commits exist — drafts
+  are plain JSON, no tooling needed.
 - `session`: opaque grouping key, NOT a locator — minted best-effort
   by the writer tool, `null` when unavailable. Never load-bearing.
 
@@ -129,14 +133,29 @@ everywhere — new optional fields need no migration.
   chosen), `correction` ("N, but actually because…" — highest-signal
   event, first-class flag), `rejections`, `outcome`.
 - `rejections[].status`: `operative` (confirmed by the choice,
-  recorded verbatim, no inference) | `presumed-false` (if-clauses of
-  other non-chosen options). Never conflate — only operative reasons
-  feed rule extraction.
+  recorded verbatim, no inference) | `presumed-false` (the likely
+  reason the option lost, recorded as inference). Never conflate —
+  only operative reasons feed rule extraction. Deciders can upgrade a
+  presumed-false reason to operative by stating their own (e.g.
+  "Option N, because XYZ" in the free-text slot).
+- `rejections[].reason_source`: REQUIRED on presumed-false rejections
+  — `if_clause` (the option's own if-clause did not hold), `inferred`
+  (most-likely reason from context, marked as the model's inference),
+  or `none` (nothing stated or inferable — ONLY then is
+  `reason: null` valid; declared, never a lazy default or a filler
+  string). Prefer `if_clause`/`inferred` over `none`. Operative
+  rejections are stated by definition (`reason_source` omitted or
+  `stated`).
 - `reason_class`: free text / `"TBD"` for now; a taxonomy emerges
   after ~20 real entries, not before.
-- `outcome`: `hit` | `miss` | `near-tie` — scored against the
-  prediction slot per stream. Near-ties are never scored as misses
-  and never carry fabricated rejection reasons.
+- `outcome`: `hit` | `miss` | `near-tie` | `refined` — scored
+  against the prediction slot per stream. Near-ties are never scored
+  as misses and never carry fabricated rejection reasons. `refined`
+  = the chosen answer CONTAINS the prediction plus an extension
+  (right but incomplete — the most common free-text answer style);
+  bucketed separately in hit rates, never counted as a miss, and
+  never auto-bumping preference counters (only clean hits confirm
+  rules).
 - `drill_down_of`: ID of the parent record when this record is a
   drill-down follow-up question (drill-downs are themselves
   prediction-scored MC events with their own records); else null.
