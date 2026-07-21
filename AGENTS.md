@@ -107,6 +107,10 @@ Placeholder syntax:
   `«` and `»` — e.g. `decisions/«id».json`, `«timestamp»-«slug»`.
   Never `<placeholder>` — it is stripped on programmatic reads and
   edits.
+- Guillemets are for tracker-posted content ONLY. In code (source
+  files, comments, error messages, help text) use plain
+  `<angle-bracket>` placeholders — committed files never pass through
+  a tracker sanitizer, and guillemets are alien there.
 
 Line wrapping:
 
