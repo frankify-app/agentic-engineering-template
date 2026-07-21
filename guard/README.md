@@ -13,7 +13,7 @@ protecting the data's integrity.
 ## Layout
 
 ```text
-«store-repo»/
+<store-repo>/
 ├── README.md               # this overview, human-facing
 ├── CLAUDE.md               # thin Claude Code shim → AGENTS.md
 ├── AGENTS.md               # agent entry point: golden rules, git rules

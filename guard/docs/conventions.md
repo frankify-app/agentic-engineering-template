@@ -12,10 +12,10 @@ subtemplate and change together there, in the same PR.
 
 ## Storage layout
 
-- `decisions/«id».json` — one immutable JSON **file** per decision,
+- `decisions/<id>.json` — one immutable JSON **file** per decision,
   flat directory. Append-only: existing files are NEVER modified,
   deleted, or renamed.
-- ID = filename stem = `«timestamp»-«slug»`, e.g.
+- ID = filename stem = `<timestamp>-<slug>`, e.g.
   `20260715T143205Z-agent-access`. The slug is a writer-chosen
   kebab-case title, ≤40 chars; the timestamp is minted (UTC) by the
   writer tool. No project prefix — `project` is a record field only;
@@ -50,11 +50,11 @@ Example (a real record):
      "if_clause": "if offline work dominates"}
   ],
   "prediction_stream": "cold",
-  "preference_set": {"commit": "«sha»"},
+  "preference_set": {"commit": "<sha>"},
   "artifact_ref": {
     "repo": "skills",
     "path": "skills/grilling/SKILL.md",
-    "commit": "«sha»",
+    "commit": "<sha>",
     "anchor": "#recording"
   },
   "session": "session_01ABC…",
@@ -161,7 +161,7 @@ everywhere — new optional fields need no migration.
   demote").
 - Rules are conditional and falsifiable, one bullet each, with a
   confirmation counter and last-confirmed date:
-  `[confirmed: «N», last: «YYYY-MM-DD»]`.
+  `[confirmed: <N>, last: <YYYY-MM-DD>]`.
 - Counter-line updates are the ONE sanctioned edit in this repo,
   executed mechanically: `submit` auto-generates `pref-confirm`
   commits from in-session preference-driven hits; CI validates the
@@ -171,7 +171,7 @@ everywhere — new optional fields need no migration.
   strengthens them (provenance is in the records: `rules_cited` +
   `chosen_slot`).
 - Promotion is separate and human-only: agents write candidate rules
-  to `proposals/«YYYY-MM-DD»-«slug».md` (one rule per file); only a
+  to `proposals/<YYYY-MM-DD>-<slug>.md` (one rule per file); only a
   human `pref-promote` commit moves content into `preferences.md`.
   Merging a proposal file is NOT promotion.
 
@@ -180,10 +180,10 @@ everywhere — new optional fields need no migration.
 This repo's own conventional-commit types, CI-linted on every PR
 commit:
 
-- `decision(«project»): «slug» — «chosen»`
-- `pref-proposal: «rule»`
-- `pref-promote: «rule»` (human only)
-- `pref-confirm: «rule» (n=«count»)` (counter bump)
+- `decision(<project>): <slug> — <chosen>`
+- `pref-proposal: <rule>`
+- `pref-promote: <rule>` (human only)
+- `pref-confirm: <rule> (n=<count>)` (counter bump)
 - `chore: ...` (structure, CI, docs)
 
 Examples:
@@ -197,7 +197,7 @@ pref-confirm: rejects new infrastructure dependencies (n=4)
 
 ## PR flow
 
-- One PR per session (branch `session/«YYYYMMDDTHHMMSSZ»`); ONE
+- One PR per session (branch `session/<YYYYMMDDTHHMMSSZ>`); ONE
   commit per record — atomic and dissectable. Partial accept =
   hand-edit the branch, drop or revert individual commits before
   merge.
