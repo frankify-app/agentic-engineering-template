@@ -7,10 +7,12 @@ edit it freely.
 ## Template-First Changes (Self-Application)
 
 This repo is the template AND uses itself as a template: root artifacts that
-have a counterpart under `template/` (`AGENTS.md`, `skills-lock.json`,
-`scripts/doctor.sh`, `scripts/agent-shims/`, …) are template *output*, never
-hand-edited. Editing both places duplicates work; editing only the root drifts
-from the template.
+have a counterpart under `template/` (`AGENTS.md`, `CLAUDE.md`,
+`skills-lock.json`, `scripts/doctor.sh`, `scripts/agent-shims/`, …) are
+template *output*, never hand-edited. Editing both places duplicates work;
+editing only the root drifts from the template. When unsure whether a root
+file is templated, check for its counterpart under `template/` (e.g.
+`template/CLAUDE.md.jinja`) before editing.
 
 For any change touching a templated file, always follow this route:
 
