@@ -59,13 +59,22 @@ ingestion tool mints them):
   else "cold" (then rules_cited must be empty).
 - artifact_ref: {"repo", "path", "commit", "anchor"} of the artifact
   the decision was about, when one exists and is identifiable from
-  the conversation; otherwise null. Never guess commit SHAs — null is
-  honest.
+  the conversation; otherwise null. Never guess commit SHAs — a
+  PARTIAL ref (repo/path/anchor with "commit": null) beats all-null
+  and gets enriched at ingestion.
 - chosen_slot: the slot that won; use a fresh slot number with
   "chosen" free text when the ruling was none of the listed options.
-- chosen: what was chosen, in the decider's words.
+- chosen: what was chosen, in the decider's words or the option
+  label — strip UI decorations such as "(Recommended)"; they are the
+  button caption, not the choice.
 - operative_reason: the stated reason for the choice, verbatim where
-  possible. Required whenever a listed non-prediction option won.
+  possible. Required whenever a listed non-prediction option won —
+  EXCEPT silent picks: when the decider chose without stating any
+  reason, set "operative_reason": null and declare
+  "operative_reason_source": "none". There is deliberately no
+  inferred tier here — operative means decider-confirmed; put your
+  inferred why-chosen in the chosen option's reasoning and in the
+  rejections instead.
 - correction: true only when the decider corrected the reasoning ("N,
   but actually because..."), else false.
 - rejections: one entry per rejected option: {"option", "reason",
@@ -73,8 +82,10 @@ ingestion tool mints them):
   "operative" = the decider actually stated this reason (record
   verbatim, no inference; "reason_source": "stated" or omitted).
   status "presumed-false" = the most-likely reason the option lost,
-  with its provenance DECLARED in reason_source: "if_clause" (the
-  option's own if-clause did not hold — reuse it as the reason),
+  with its provenance DECLARED in reason_source: "if_clause" (ONLY
+  when the option literally carries an if_clause field, which did not
+  hold — reuse it as the reason; text drawn from its reasoning is
+  "inferred"),
   "inferred" (your best inference from context, marked as such), or
   "none" (nothing stated or inferable — ONLY then set "reason": null;
   never a filler string like "none stated", and never "none" as the

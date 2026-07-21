@@ -51,6 +51,11 @@ REJECTION_STATUSES = frozenset({"operative", "presumed-false"})
 # reason is only valid when explicitly declared "none" — never a lazy
 # default.
 PRESUMED_REASON_SOURCES = frozenset({"if_clause", "inferred", "none"})
+# Operative reasons are decider-confirmed only — deliberately NO
+# 'inferred' tier (an inferred why-chosen belongs in the chosen
+# option's own reasoning and in the rejections). 'none' declares a
+# silent pick: the decider chose without stating a reason.
+OPERATIVE_REASON_SOURCES = frozenset({"stated", "none"})
 
 MAX_SLUG_LENGTH = 40
 ID_RE = re.compile(r"^(\d{8}T\d{6}Z)-([a-z0-9]+(?:-[a-z0-9]+)*)$")
@@ -201,7 +206,27 @@ def _validate_ruling(
                 "prediction slot (that is a hit)"
             )
 
-    # operative_reason is required when a listed non-prediction option won.
+    # operative_reason is required when a listed non-prediction option
+    # won — unless the pick was declared silent.
+    operative_source = record.get("operative_reason_source")
+    if operative_source is not None:
+        if operative_source not in OPERATIVE_REASON_SOURCES:
+            errors.append(
+                f"operative_reason_source: {operative_source!r} not in "
+                f"{sorted(OPERATIVE_REASON_SOURCES)} (operative reasons are "
+                "decider-confirmed only — no inferred tier)"
+            )
+        elif operative_source == "none":
+            if record.get("operative_reason") is not None:
+                errors.append(
+                    "operative_reason: must be null when "
+                    "operative_reason_source is 'none' (silent pick)"
+                )
+        elif not record.get("operative_reason"):
+            errors.append(
+                "operative_reason: must be a non-empty string when "
+                "operative_reason_source is 'stated'"
+            )
     options = record.get("options")
     if isinstance(options, list) and chosen_slot is not None:
         chosen_option = next(
@@ -216,10 +241,12 @@ def _validate_ruling(
             chosen_option is not None
             and chosen_option.get("role") not in PREDICTION_ROLES
             and not record.get("operative_reason")
+            and operative_source != "none"
         ):
             errors.append(
                 "operative_reason: required when a listed non-prediction "
-                "option is chosen"
+                "option is chosen (declare operative_reason_source 'none' "
+                "for a silent pick)"
             )
 
     rejections = record.get("rejections")

@@ -119,9 +119,10 @@ everywhere — new optional fields need no migration.
 - `artifact_ref`: REQUIRED when an artifact exists — repo-relative
   path + commit SHA (content-addressed, survives rewrites) + anchor
   when possible. Null only if genuinely no artifact. Chat-extracted
-  drafts carry null refs by design (never guess SHAs); enrich them in
-  the drafts file at ingestion time, once the commits exist — drafts
-  are plain JSON, no tooling needed.
+  drafts carry null refs by design (never guess SHAs); PARTIAL refs
+  are welcome — repo/path/anchor with `commit: null` beats all-null.
+  Enrich them in the drafts file at ingestion time, once the commits
+  exist — drafts are plain JSON, no tooling needed.
 - `session`: opaque grouping key, NOT a locator — minted best-effort
   by the writer tool, `null` when unavailable. Never load-bearing.
 
@@ -132,6 +133,13 @@ everywhere — new optional fields need no migration.
   free-text reason — required when a listed non-prediction option is
   chosen), `correction` ("N, but actually because…" — highest-signal
   event, first-class flag), `rejections`, `outcome`.
+- `operative_reason_source`: `stated` (default — non-empty
+  `operative_reason` required) | `none` (silent pick: the decider
+  chose a listed non-prediction option without stating a reason;
+  `operative_reason` must be null — declared, never lazy).
+  Deliberately NO inferred tier: operative means decider-confirmed;
+  an inferred why-chosen lives in the chosen option's own `reasoning`
+  and in the rejections.
 - `rejections[].status`: `operative` (confirmed by the choice,
   recorded verbatim, no inference) | `presumed-false` (the likely
   reason the option lost, recorded as inference). Never conflate —
