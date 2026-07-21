@@ -91,6 +91,25 @@ Code-specific skills:
 - Commits: conventional commits
 - Document unexpected encounters and design decisions in commit message as well as PR/Issue
 
+### Tracker Placeholder Syntax
+
+Tracker APIs and sanitizers silently strip angle-bracket tokens as HTML,
+so `<placeholder>` syntax corrupts issue/PR bodies on programmatic reads
+and edits.
+
+- In ALL content posted to the tracker (issue bodies, PR descriptions,
+  comments), write placeholders with guillemets: `«` and `»` — e.g.
+  `decisions/«id».json`, `«timestamp»-«slug»`. Never `<placeholder>`.
+  (Angle brackets remain fine in files committed to the repo, like this
+  one — the rule covers tracker-posted content only.)
+- If an EXISTING ticket is found using `<...>` placeholders, ask the
+  user whether it should be fixed (converted to `«…»`) — don't rewrite
+  it unprompted.
+- If such placeholders occur in content you are about to post anyway as
+  a normal message (no explicit edit of an existing ticket needed —
+  e.g. a new ticket, comment, or quoted text), fix them to `«…»`
+  proactively and tell the user you did.
+
 ### Agentic Engineering Workflow
 
 Use `ghx` for all repository interaction. `gh` and `tea` are disabled — calling them tells you to use `ghx` instead (enforced via shims in `scripts/agent-shims/`, on PATH in agent sessions only; tracker access through MCP tools is not gated by the shims).
