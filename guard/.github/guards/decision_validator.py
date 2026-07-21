@@ -69,7 +69,7 @@ def estimate_tokens(text: str) -> int:
 
 
 def validate_id(record_id: object) -> list[str]:
-    """Check the ID grammar: «YYYYMMDDTHHMMSSZ»-«kebab-slug», slug <= 40."""
+    """Check the ID grammar: <YYYYMMDDTHHMMSSZ>-<kebab-slug>, slug <= 40."""
     if not isinstance(record_id, str):
         return ["id: must be a string"]
     match = ID_RE.match(record_id)
