@@ -33,6 +33,7 @@ COMMON_FILES = frozenset(
         "scripts/doctor.sh",
         "scripts/enable-agent-shims.sh",
         "skills-lock.json",
+        "tools/record.py",
     }
 )
 
