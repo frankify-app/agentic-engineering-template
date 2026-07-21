@@ -40,6 +40,10 @@ def test_slug_auto_derived(
         defaults=True,
         unsafe=True,
         skip_tasks=True,
+        # Pin HEAD: with release tags present locally, copier would
+        # otherwise render the latest RELEASE instead of this branch
+        # (CI checkouts have no tags and already fall back to HEAD).
+        vcs_ref="HEAD",
     )
 
     assert (dst_path / "docs" / "glossary" / "my-cool-app.md").exists()
@@ -62,6 +66,10 @@ def _render(tmp_path: Path, answers: dict[str, str], dst_name: str) -> Path:
         defaults=True,
         unsafe=True,
         skip_tasks=True,
+        # Pin HEAD: with release tags present locally, copier would
+        # otherwise render the latest RELEASE instead of this branch
+        # (CI checkouts have no tags and already fall back to HEAD).
+        vcs_ref="HEAD",
     )
     return dst_path
 
@@ -290,6 +298,7 @@ def test_conventions_file_seeded_once_and_never_overwritten(
         unsafe=True,
         skip_tasks=True,
         overwrite=True,
+        vcs_ref="HEAD",
     )
     assert conventions.read_text() == "# Hand-written vault rules\n"
 

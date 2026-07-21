@@ -54,6 +54,10 @@ def render_project(tmp_path: Path, base_answers: dict[str, str]):
             defaults=True,
             unsafe=True,
             skip_tasks=True,
+            # Pin HEAD: with release tags present locally, copier would
+            # otherwise render the latest RELEASE instead of this branch
+            # (CI checkouts have no tags and already fall back to HEAD).
+            vcs_ref="HEAD",
         )
         return dst_path
 
