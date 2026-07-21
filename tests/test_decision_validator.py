@@ -72,6 +72,7 @@ def valid_record() -> dict:
                 "option": "full-access direct push",
                 "reason": "agent could silently rewrite preference history",
                 "status": "presumed-false",
+                "reason_source": "inferred",
                 "reason_class": "TBD",
             },
         ],
@@ -196,6 +197,57 @@ def test_rejection_status_vocabulary() -> None:
     record = valid_record()
     record["rejections"][0]["status"] = "maybe"
     assert any("status" in e for e in dv.validate_record(record))
+
+
+def test_presumed_false_requires_reason_source() -> None:
+    record = valid_record()
+    del record["rejections"][1]["reason_source"]
+    assert any("reason_source" in e for e in dv.validate_record(record))
+
+
+def test_reason_source_none_requires_null_reason() -> None:
+    # Declared-none with null reason: valid (silent MC pick, nothing
+    # stated or inferable — never a filler string).
+    record = valid_record()
+    record["rejections"][1]["reason_source"] = "none"
+    record["rejections"][1]["reason"] = None
+    assert dv.validate_record(record) == []
+
+    # none + a reason string is contradictory.
+    record = valid_record()
+    record["rejections"][1]["reason_source"] = "none"
+    assert any("reason" in e for e in dv.validate_record(record))
+
+    # Lazy null without the declaration is rejected.
+    record = valid_record()
+    record["rejections"][1]["reason"] = None
+    record["rejections"][1]["reason_source"] = "inferred"
+    assert any("reason" in e for e in dv.validate_record(record))
+
+
+def test_if_clause_reason_source_accepted() -> None:
+    record = valid_record()
+    record["rejections"][1]["reason_source"] = "if_clause"
+    record["rejections"][1]["reason"] = "if write friction matters more"
+    assert dv.validate_record(record) == []
+
+
+def test_operative_rejections_are_stated_by_definition() -> None:
+    record = valid_record()
+    record["rejections"][0]["reason_source"] = "inferred"
+    assert any("operative" in e for e in dv.validate_record(record))
+
+    record = valid_record()
+    record["rejections"][0]["reason_source"] = "stated"
+    assert dv.validate_record(record) == []
+
+
+def test_refined_outcome_exempt_from_slot_consistency() -> None:
+    # chosen differs from the prediction slot but CONTAINS the
+    # prediction plus an extension: refined, not a miss.
+    record = valid_record()
+    record["outcome"] = "refined"
+    assert dv.validate_record(record) == []
 
 
 def test_corpus_dangling_references() -> None:
