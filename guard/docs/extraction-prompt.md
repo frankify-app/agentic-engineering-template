@@ -95,16 +95,17 @@ ingestion tool mints them):
   extension or qualification (right but incomplete — do not score
   these as misses), "miss" if the prediction was actually wrong,
   "near-tie" when the decider declared it too close to score.
-- supersedes_slug: when this ruling supersedes ANOTHER DRAFT IN THIS
-  BATCH, name that draft's slug here; the ingestion tool resolves it
-  to the minted ID. Use this — never prose in notes — for in-batch
-  supersession.
+- In-batch references — name OTHER DRAFTS IN THIS BATCH by slug;
+  the ingestion tool resolves them to minted IDs. Use these — never
+  prose in notes: supersedes_slug (this ruling replaces that one),
+  drill_down_of_slug (this ruling answers a follow-up question opened
+  by that one), related_slugs (list; informs/refines).
 - Optional, only when the conversation supports them: notes,
   closure_of (number of a closed-unmerged PR this ruling explains),
   session (the conversation/session identifier if known). Leave
   related / supersedes / drill_down_of OUT unless you are referencing
   record IDs that already exist in the repository (for in-batch
-  references, use supersedes_slug above).
+  references, use the slug fields above).
 
 RULES:
 - Input side before output side: report options and reasoning as they

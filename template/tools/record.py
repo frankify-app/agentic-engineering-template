@@ -17,8 +17,9 @@ Verbs:
            session branch, run the stateless closed-unmerged-PR sweep
   record   mint + validate + write one decision record per input
            draft (stdin JSON object/array, or --from drafts.json),
-           one commit per record; batch-local supersedes_slug
-           references resolve to the minted IDs
+           one commit per record; batch-local slug references
+           (supersedes_slug, drill_down_of_slug, related_slugs)
+           resolve to the minted IDs
   check    validate the entire decisions/ corpus + dangling refs +
            preferences.md token budget
   submit   compute two-stream hit rates (refined and near-tie
@@ -154,35 +155,54 @@ def serialize_record(record: dict) -> str:
     return json.dumps(record, ensure_ascii=False, indent=2) + "\n"
 
 
-def resolve_batch_supersedes(drafts: list, now: dt.datetime) -> list:
-    """Resolve batch-local ``supersedes_slug`` references to minted IDs.
+def resolve_batch_refs(drafts: list, now: dt.datetime) -> list:
+    """Resolve batch-local slug references to minted IDs.
 
     Drafts extracted from one conversation cannot know each other's
-    final IDs, so cross-draft supersession names the target by slug;
-    this maps every reference to the ID the batch will mint
+    final IDs, so cross-draft links name their target by slug:
+    ``supersedes_slug`` and ``drill_down_of_slug`` (single),
+    ``related_slugs`` (list, appended to any repo-ID ``related``
+    entries). This maps every reference to the ID the batch will mint
     (order-independent). Raises ValueError on unknown slugs or when a
-    draft carries both ``supersedes`` and ``supersedes_slug``.
+    draft carries both a slug reference and its resolved field.
     """
     minted = {}
     for d in drafts:
         slug = d.get("slug")
         if isinstance(slug, str) and SLUG_RE.match(slug):
             minted[slug] = mint_id(slug, now)
+
+    def resolve(draft_slug, ref):
+        if ref not in minted:
+            raise ValueError(
+                f"draft {draft_slug!r}: batch reference {ref!r} matches "
+                "no slug in this batch"
+            )
+        return minted[ref]
+
     resolved = []
     for d in drafts:
         d = dict(d)
-        ref = d.pop("supersedes_slug", None)
-        if ref is not None:
-            if d.get("supersedes"):
+        for slug_field, target in (
+            ("supersedes_slug", "supersedes"),
+            ("drill_down_of_slug", "drill_down_of"),
+        ):
+            ref = d.pop(slug_field, None)
+            if ref is not None:
+                if d.get(target):
+                    raise ValueError(
+                        f"draft {d.get('slug')!r}: both {target} and "
+                        f"{slug_field} given — use one"
+                    )
+                d[target] = resolve(d.get("slug"), ref)
+        refs = d.pop("related_slugs", None)
+        if refs is not None:
+            if not isinstance(refs, list):
                 raise ValueError(
-                    f"draft {d.get('slug')!r}: both supersedes and "
-                    "supersedes_slug given — use one"
+                    f"draft {d.get('slug')!r}: related_slugs must be a list"
                 )
-            if ref not in minted:
-                raise ValueError(
-                    f"supersedes_slug {ref!r} matches no slug in this batch"
-                )
-            d["supersedes"] = minted[ref]
+            existing = d.get("related") or []
+            d["related"] = existing + [resolve(d.get("slug"), r) for r in refs]
         resolved.append(d)
     return resolved
 
@@ -473,7 +493,7 @@ def cmd_record(args: argparse.Namespace) -> int:
 
     drafts = read_drafts(args)
     try:
-        drafts = resolve_batch_supersedes(drafts, now)
+        drafts = resolve_batch_refs(drafts, now)
     except ValueError as exc:
         raise fail(str(exc))
     records = []
