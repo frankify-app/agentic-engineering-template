@@ -157,3 +157,45 @@ def test_repo_url_tail_matches_across_url_forms() -> None:
     assert tail("https://github.com/acme/OTHER") != tail(
         "https://github.com/acme/decision-memory"
     )
+
+
+def test_resolve_batch_supersedes_maps_slugs_to_minted_ids() -> None:
+    drafts = [draft(), draft()]
+    drafts[0]["slug"] = "old-ruling"
+    drafts[1]["slug"] = "new-ruling"
+    drafts[1]["supersedes_slug"] = "old-ruling"
+    resolved = record_tool.resolve_batch_supersedes(drafts, NOW)
+    assert resolved[1]["supersedes"] == record_tool.mint_id("old-ruling", NOW)
+    assert "supersedes_slug" not in resolved[1]
+    # Order-independent: a draft may supersede a LATER one too.
+    drafts[0]["supersedes_slug"] = "new-ruling"
+    resolved = record_tool.resolve_batch_supersedes(drafts, NOW)
+    assert resolved[0]["supersedes"] == record_tool.mint_id("new-ruling", NOW)
+
+
+def test_resolve_batch_supersedes_rejects_unknown_slug() -> None:
+    d = draft()
+    d["supersedes_slug"] = "not-in-this-batch"
+    with pytest.raises(ValueError):
+        record_tool.resolve_batch_supersedes([d], NOW)
+
+
+def test_resolve_batch_supersedes_rejects_conflicting_fields() -> None:
+    drafts = [draft(), draft()]
+    drafts[0]["slug"] = "old-ruling"
+    drafts[1]["supersedes_slug"] = "old-ruling"
+    drafts[1]["supersedes"] = "20260101T000000Z-existing"
+    with pytest.raises(ValueError):
+        record_tool.resolve_batch_supersedes(drafts, NOW)
+
+
+def test_session_hit_rates_bucket_refined_separately() -> None:
+    records = [
+        {"prediction_stream": "cold", "outcome": "hit"},
+        {"prediction_stream": "cold", "outcome": "refined"},
+        {"prediction_stream": "cold", "outcome": "miss"},
+        {"prediction_stream": "preference-driven", "outcome": "refined"},
+    ]
+    streams = record_tool.session_hit_rates(records)
+    assert streams["cold"] == {"hit": 1, "miss": 1, "near-tie": 0, "refined": 1}
+    assert streams["preference-driven"]["refined"] == 1
