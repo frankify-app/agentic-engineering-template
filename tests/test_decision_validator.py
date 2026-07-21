@@ -276,3 +276,31 @@ def test_preferences_budget() -> None:
     assert dv.check_preferences_budget("## Rules\n- one short rule\n") == []
     errors = dv.check_preferences_budget("x" * 50_000)
     assert any("promote requires demote" in e for e in errors)
+
+
+def test_silent_pick_requires_declared_operative_reason_source() -> None:
+    # A listed non-prediction option chosen without any stated reason
+    # (silent MC tap): valid only under a declared 'none'.
+    record = valid_record()
+    record["chosen_slot"] = 2
+    record["operative_reason"] = None
+    assert any("operative_reason" in e for e in dv.validate_record(record))
+
+    record["operative_reason_source"] = "none"
+    assert dv.validate_record(record) == []
+
+
+def test_operative_reason_source_none_requires_null_reason() -> None:
+    record = valid_record()
+    record["operative_reason_source"] = "none"
+    assert any("operative_reason" in e for e in dv.validate_record(record))
+
+
+def test_operative_reason_source_vocabulary() -> None:
+    record = valid_record()
+    record["operative_reason_source"] = "inferred"
+    assert any("operative_reason_source" in e for e in dv.validate_record(record))
+
+    record = valid_record()
+    record["operative_reason_source"] = "stated"
+    assert dv.validate_record(record) == []
