@@ -181,21 +181,25 @@ def _validate_ruling(
     if outcome not in OUTCOMES:
         errors.append(f"outcome: {outcome!r} not in {sorted(OUTCOMES)}")
     elif (
-        outcome in ("hit", "miss")
+        outcome != "near-tie"
         and prediction_option is not None
         and chosen_slot is not None
     ):
         # Scored outcomes must match the slots. Near-ties are exempt by
-        # design (never scored as misses); 'refined' means the chosen
-        # answer CONTAINS the prediction plus an extension, so the slot
-        # differs without the prediction being wrong.
+        # design (never scored as misses); 'refined' requires a slot
+        # MISMATCH like miss — the chosen answer CONTAINS the
+        # prediction plus an extension, distinguished from miss only by
+        # that containment judgment (same slot would be a plain hit).
         hit = chosen_slot == prediction_option.get("slot")
         if outcome == "hit" and not hit:
             errors.append(
                 "outcome: 'hit' but chosen_slot differs from the prediction slot"
             )
-        if outcome == "miss" and hit:
-            errors.append("outcome: 'miss' but chosen_slot equals the prediction slot")
+        if outcome in ("miss", "refined") and hit:
+            errors.append(
+                f"outcome: {outcome!r} but chosen_slot equals the "
+                "prediction slot (that is a hit)"
+            )
 
     # operative_reason is required when a listed non-prediction option won.
     options = record.get("options")

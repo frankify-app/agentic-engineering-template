@@ -242,12 +242,20 @@ def test_operative_rejections_are_stated_by_definition() -> None:
     assert dv.validate_record(record) == []
 
 
-def test_refined_outcome_exempt_from_slot_consistency() -> None:
+def test_refined_outcome_requires_slot_mismatch() -> None:
     # chosen differs from the prediction slot but CONTAINS the
     # prediction plus an extension: refined, not a miss.
     record = valid_record()
     record["outcome"] = "refined"
     assert dv.validate_record(record) == []
+
+    # refined with chosen_slot == prediction slot is really a hit —
+    # same slot rule as miss, distinguished only by containment.
+    record = valid_record()
+    record["chosen_slot"] = 1
+    record["operative_reason"] = None
+    record["outcome"] = "refined"
+    assert any("refined" in e for e in dv.validate_record(record))
 
 
 def test_corpus_dangling_references() -> None:
