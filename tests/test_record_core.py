@@ -164,12 +164,12 @@ def test_resolve_batch_supersedes_maps_slugs_to_minted_ids() -> None:
     drafts[0]["slug"] = "old-ruling"
     drafts[1]["slug"] = "new-ruling"
     drafts[1]["supersedes_slug"] = "old-ruling"
-    resolved = record_tool.resolve_batch_supersedes(drafts, NOW)
+    resolved = record_tool.resolve_batch_refs(drafts, NOW)
     assert resolved[1]["supersedes"] == record_tool.mint_id("old-ruling", NOW)
     assert "supersedes_slug" not in resolved[1]
     # Order-independent: a draft may supersede a LATER one too.
     drafts[0]["supersedes_slug"] = "new-ruling"
-    resolved = record_tool.resolve_batch_supersedes(drafts, NOW)
+    resolved = record_tool.resolve_batch_refs(drafts, NOW)
     assert resolved[0]["supersedes"] == record_tool.mint_id("new-ruling", NOW)
 
 
@@ -177,7 +177,7 @@ def test_resolve_batch_supersedes_rejects_unknown_slug() -> None:
     d = draft()
     d["supersedes_slug"] = "not-in-this-batch"
     with pytest.raises(ValueError):
-        record_tool.resolve_batch_supersedes([d], NOW)
+        record_tool.resolve_batch_refs([d], NOW)
 
 
 def test_resolve_batch_supersedes_rejects_conflicting_fields() -> None:
@@ -186,7 +186,7 @@ def test_resolve_batch_supersedes_rejects_conflicting_fields() -> None:
     drafts[1]["supersedes_slug"] = "old-ruling"
     drafts[1]["supersedes"] = "20260101T000000Z-existing"
     with pytest.raises(ValueError):
-        record_tool.resolve_batch_supersedes(drafts, NOW)
+        record_tool.resolve_batch_refs(drafts, NOW)
 
 
 def test_session_hit_rates_bucket_refined_separately() -> None:
@@ -199,3 +199,32 @@ def test_session_hit_rates_bucket_refined_separately() -> None:
     streams = record_tool.session_hit_rates(records)
     assert streams["cold"] == {"hit": 1, "miss": 1, "near-tie": 0, "refined": 1}
     assert streams["preference-driven"]["refined"] == 1
+
+
+def test_resolve_batch_refs_handles_drill_down_and_related() -> None:
+    drafts = [draft(), draft(), draft()]
+    drafts[0]["slug"] = "parent-ruling"
+    drafts[1]["slug"] = "sibling-ruling"
+    drafts[2]["slug"] = "follow-up"
+    drafts[2]["drill_down_of_slug"] = "parent-ruling"
+    drafts[2]["related_slugs"] = ["sibling-ruling"]
+    resolved = record_tool.resolve_batch_refs(drafts, NOW)
+    assert resolved[2]["drill_down_of"] == record_tool.mint_id("parent-ruling", NOW)
+    assert resolved[2]["related"] == [record_tool.mint_id("sibling-ruling", NOW)]
+    assert "drill_down_of_slug" not in resolved[2]
+    assert "related_slugs" not in resolved[2]
+
+    # related_slugs merges with pre-existing repo-ID references.
+    drafts[2]["related"] = ["20260101T000000Z-existing"]
+    resolved = record_tool.resolve_batch_refs(drafts, NOW)
+    assert resolved[2]["related"] == [
+        "20260101T000000Z-existing",
+        record_tool.mint_id("sibling-ruling", NOW),
+    ]
+
+
+def test_resolve_batch_refs_rejects_unknown_drill_down_slug() -> None:
+    d = draft()
+    d["drill_down_of_slug"] = "not-in-batch"
+    with pytest.raises(ValueError):
+        record_tool.resolve_batch_refs([d], NOW)
