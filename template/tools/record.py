@@ -17,12 +17,14 @@ Verbs:
            session branch, run the stateless closed-unmerged-PR sweep
   record   mint + validate + write one decision record per input
            draft (stdin JSON object/array, or --from drafts.json),
-           one commit per record
+           one commit per record; batch-local supersedes_slug
+           references resolve to the minted IDs
   check    validate the entire decisions/ corpus + dangling refs +
            preferences.md token budget
-  submit   compute two-stream hit rates, auto-bump pref-confirm
-           counters, push, open the PR (or emit the managed-
-           environment handoff)
+  submit   compute two-stream hit rates (refined and near-tie
+           bucketed separately), auto-bump pref-confirm counters for
+           clean preference-driven hits, push, open the PR (or emit
+           the managed-environment handoff)
   propose  write a preference-rule proposal file with its commit
 
 Configuration: DECISION_MEMORY_URL (full git URL of the data repo;
@@ -150,6 +152,39 @@ def draft_to_record(
 def serialize_record(record: dict) -> str:
     """Serialize a record for its immutable decisions/<id>.json file."""
     return json.dumps(record, ensure_ascii=False, indent=2) + "\n"
+
+
+def resolve_batch_supersedes(drafts: list, now: dt.datetime) -> list:
+    """Resolve batch-local ``supersedes_slug`` references to minted IDs.
+
+    Drafts extracted from one conversation cannot know each other's
+    final IDs, so cross-draft supersession names the target by slug;
+    this maps every reference to the ID the batch will mint
+    (order-independent). Raises ValueError on unknown slugs or when a
+    draft carries both ``supersedes`` and ``supersedes_slug``.
+    """
+    minted = {}
+    for d in drafts:
+        slug = d.get("slug")
+        if isinstance(slug, str) and SLUG_RE.match(slug):
+            minted[slug] = mint_id(slug, now)
+    resolved = []
+    for d in drafts:
+        d = dict(d)
+        ref = d.pop("supersedes_slug", None)
+        if ref is not None:
+            if d.get("supersedes"):
+                raise ValueError(
+                    f"draft {d.get('slug')!r}: both supersedes and "
+                    "supersedes_slug given — use one"
+                )
+            if ref not in minted:
+                raise ValueError(
+                    f"supersedes_slug {ref!r} matches no slug in this batch"
+                )
+            d["supersedes"] = minted[ref]
+        resolved.append(d)
+    return resolved
 
 
 # ============================ IO shell =============================
@@ -437,6 +472,10 @@ def cmd_record(args: argparse.Namespace) -> int:
     now = dt.datetime.now(dt.timezone.utc)
 
     drafts = read_drafts(args)
+    try:
+        drafts = resolve_batch_supersedes(drafts, now)
+    except ValueError as exc:
+        raise fail(str(exc))
     records = []
     errors: list[str] = []
     for index, draft in enumerate(drafts):
@@ -555,8 +594,8 @@ def bump_preference_counter(
 
 def session_hit_rates(records: list[dict]) -> dict[str, dict[str, int]]:
     streams: dict[str, dict[str, int]] = {
-        "preference-driven": {"hit": 0, "miss": 0, "near-tie": 0},
-        "cold": {"hit": 0, "miss": 0, "near-tie": 0},
+        "preference-driven": {"hit": 0, "miss": 0, "near-tie": 0, "refined": 0},
+        "cold": {"hit": 0, "miss": 0, "near-tie": 0, "refined": 0},
     }
     for record in records:
         stream = record.get("prediction_stream")
@@ -582,8 +621,13 @@ def build_pr_body(records: list[dict], streams: dict[str, dict[str, int]]) -> st
         counts = streams[stream]
         scored = counts["hit"] + counts["miss"]
         shown = f"{counts['hit']}/{scored} hits" if scored else "no scored"
-        if counts["near-tie"]:
-            shown += f" ({counts['near-tie']} near-tie)"
+        extras = [
+            f"{counts[bucket]} {bucket}"
+            for bucket in ("refined", "near-tie")
+            if counts[bucket]
+        ]
+        if extras:
+            shown += f" ({', '.join(extras)})"
         return shown
 
     lines = [

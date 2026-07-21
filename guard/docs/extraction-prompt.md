@@ -7,10 +7,13 @@ execution, or repo access are needed there: the output is plain JSON.
 Then ferry the output here: save it as `drafts.json` (or copy the
 fenced block) and, in a session with repo access, ingest it with the
 recorder — `record.py open`, then `record --from drafts.json`, then
-`check`, then `submit`. Validation happens ONLY at ingestion, against
-this repo's vendored validator; malformed drafts fail loudly there,
-where an agent can fix them with you. There is deliberately no
-chat-side validator to drift.
+`check`, then `submit`. Before ingesting, enrich `artifact_ref` in
+the drafts file wherever the referenced commits now exist —
+extraction leaves refs null by design (never guess SHAs), and drafts
+are plain JSON, editable freely until ingestion. Validation happens
+ONLY at ingestion, against this repo's vendored validator; malformed
+drafts fail loudly there, where an agent can fix them with you. There
+is deliberately no chat-side validator to drift.
 
 This prompt mirrors the record schema in
 [conventions.md](conventions.md); both are vendored from the template
@@ -27,9 +30,11 @@ reasons: design decisions, scope calls, convention adoptions, tool
 choices, process rules. Skip trivial or ephemeral choices that would
 not inform future decisions. Then emit one DRAFT RECORD per ruling.
 
-OUTPUT: a single fenced JSON array of draft records and nothing else.
-If you can produce downloadable files, also offer the array as
-drafts.json. Do not validate, do not add commentary inside the fence.
+OUTPUT: one JSON array of draft records and nothing else. Prefer a
+downloadable drafts.json when your environment supports file output
+(large batches are hostile to inline fences); otherwise emit a single
+fenced JSON array. Do not validate, do not add commentary inside the
+output.
 
 DRAFT RECORD FIELDS (a draft is the record schema MINUS tool-minted
 fields — do NOT invent v, type, id, date, or timestamps; the
@@ -64,20 +69,31 @@ ingestion tool mints them):
 - correction: true only when the decider corrected the reasoning ("N,
   but actually because..."), else false.
 - rejections: one entry per rejected option: {"option", "reason",
-  "status", "reason_class": "TBD"}. status "operative" = the decider
-  actually stated this reason (record verbatim, no inference);
-  status "presumed-false" = inferred from an option's own if-clause
-  not holding. NEVER invent reasons.
+  "reason_source", "status", "reason_class": "TBD"}. status
+  "operative" = the decider actually stated this reason (record
+  verbatim, no inference; "reason_source": "stated" or omitted).
+  status "presumed-false" = the most-likely reason the option lost,
+  with its provenance DECLARED in reason_source: "if_clause" (the
+  option's own if-clause did not hold — reuse it as the reason),
+  "inferred" (your best inference from context, marked as such), or
+  "none" (nothing stated or inferable — ONLY then set "reason": null;
+  never a filler string like "none stated", and never "none" as the
+  easy way out when context supports an inference).
 - outcome: "hit" if chosen_slot equals the prediction option's slot,
-  "miss" if not, "near-tie" when the decider declared it too close to
-  score.
+  "refined" if the chosen answer CONTAINS the prediction plus an
+  extension or qualification (right but incomplete — do not score
+  these as misses), "miss" if the prediction was actually wrong,
+  "near-tie" when the decider declared it too close to score.
+- supersedes_slug: when this ruling supersedes ANOTHER DRAFT IN THIS
+  BATCH, name that draft's slug here; the ingestion tool resolves it
+  to the minted ID. Use this — never prose in notes — for in-batch
+  supersession.
 - Optional, only when the conversation supports them: notes,
   closure_of (number of a closed-unmerged PR this ruling explains),
   session (the conversation/session identifier if known). Leave
   related / supersedes / drill_down_of OUT unless you are referencing
-  record IDs that already exist in the repository — cross-references
-  between drafts in this batch go into notes instead (final IDs do
-  not exist yet).
+  record IDs that already exist in the repository (for in-batch
+  references, use supersedes_slug above).
 
 RULES:
 - Input side before output side: report options and reasoning as they
