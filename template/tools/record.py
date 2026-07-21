@@ -9,9 +9,12 @@ backfilled decision records). The contract this tool must satisfy
 decision-memory repo's docs/conventions.md and CI guards.
 
 Verbs:
-  open     clone the data repo (ephemeral temp dir), capture the
-           preference-set SHA, create the session branch, run the
-           stateless closed-unmerged-PR sweep
+  open     make the store repo available — clone it into an ephemeral
+           temp dir, or reuse an already-attached checkout
+           (--use <path>, matched against DECISION_MEMORY_URL by
+           owner/repo) where cloning is impossible (e.g. managed
+           environments); capture the preference-set SHA, create the
+           session branch, run the stateless closed-unmerged-PR sweep
   record   mint + validate + write one decision record per input
            draft (stdin JSON object/array, or --from drafts.json),
            one commit per record
@@ -161,6 +164,20 @@ GITHUB_URL_RE = re.compile(
 )
 
 
+def repo_url_tail(url: str) -> str:
+    """Normalize a git URL to its trailing owner/repo pair (lowercase).
+
+    Managed environments rewrite remotes through local proxies, so two
+    URLs for the same repo rarely match textually — the owner/repo
+    tail is the stable identity across https/ssh/proxy forms.
+    """
+    path = url.rstrip("/")
+    if path.endswith(".git"):
+        path = path[: -len(".git")]
+    parts = [p for p in path.replace(":", "/").split("/") if p]
+    return "/".join(parts[-2:]).lower()
+
+
 def fail(message: str) -> "SystemExit":
     return SystemExit(f"record.py: error: {message}")
 
@@ -293,6 +310,25 @@ def covered_closures(records: dict[str, dict]) -> set[int]:
     }
 
 
+def _attach_checkout(path_arg: str, url: str) -> Path:
+    """Validate an already-available checkout of the store repo."""
+    repo_dir = Path(path_arg).resolve()
+    if not (repo_dir / ".git").exists():
+        raise fail(f"--use {repo_dir}: not a git checkout")
+    origin = run_git(repo_dir, "config", "--get", "remote.origin.url").strip()
+    if repo_url_tail(origin) != repo_url_tail(url):
+        raise fail(
+            f"--use {repo_dir}: origin {origin!r} is not the store repo "
+            f"(DECISION_MEMORY_URL points at {repo_url_tail(url)!r})"
+        )
+    if run_git(repo_dir, "status", "--porcelain").strip():
+        raise fail(
+            f"--use {repo_dir}: worktree is dirty — commit or stash "
+            "before opening a recording session in it"
+        )
+    return repo_dir
+
+
 def cmd_open(args: argparse.Namespace) -> int:
     url = os.environ.get("DECISION_MEMORY_URL")
     if not url:
@@ -301,14 +337,23 @@ def cmd_open(args: argparse.Namespace) -> int:
             "your decision-memory repo (never commit it anywhere public)"
         )
     now = dt.datetime.now(dt.timezone.utc)
-    repo_dir = Path(tempfile.mkdtemp(prefix="decision-memory-"))
-    result = subprocess.run(
-        ["git", "clone", "--depth", "1", url, str(repo_dir)],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise fail(f"clone failed:\n{result.stderr}")
+    if args.use:
+        repo_dir = _attach_checkout(args.use, url)
+        print(f"Reusing attached checkout: {repo_dir}")
+    else:
+        repo_dir = Path(tempfile.mkdtemp(prefix="decision-memory-"))
+        result = subprocess.run(
+            ["git", "clone", "--depth", "1", url, str(repo_dir)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise fail(
+                f"clone failed:\n{result.stderr}\n"
+                "If the store repo is already available in this session "
+                "(e.g. attached in a managed environment where outbound "
+                "cloning is blocked), re-run: open --use <path-to-checkout>"
+            )
 
     base_commit = run_git(repo_dir, "rev-parse", "HEAD").strip()
     branch = "session/" + now.strftime("%Y%m%dT%H%M%SZ")
@@ -335,7 +380,7 @@ def cmd_open(args: argparse.Namespace) -> int:
     covered = covered_closures(records)
     closed_prs = list_closed_unmerged_prs(url)
 
-    print(f"Cloned into: {repo_dir}")
+    print(f"Store checkout: {repo_dir}")
     print(f"Session branch: {branch}")
     print(f"preference_set.commit for this session: {base_commit}")
     print()
@@ -716,6 +761,12 @@ def main(argv: list[str] | None = None) -> int:
     p_open.add_argument(
         "--session",
         help="opaque session grouping key (default: $CLAUDE_SESSION_ID)",
+    )
+    p_open.add_argument(
+        "--use",
+        help="reuse an already-available checkout of the store repo "
+        "instead of cloning (validated against DECISION_MEMORY_URL by "
+        "owner/repo; worktree must be clean)",
     )
     p_open.set_defaults(func=cmd_open)
 
