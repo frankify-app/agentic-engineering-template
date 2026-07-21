@@ -1,11 +1,26 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
+from types import ModuleType
 
 import copier
 import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
+
+
+def load_module(name: str, path: Path) -> ModuleType:
+    """Import a module from an explicit file path.
+
+    The guard scripts and tools are plain files, not packages; every
+    test module loads them through this single helper.
+    """
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture
