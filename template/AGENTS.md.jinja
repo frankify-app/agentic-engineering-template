@@ -39,6 +39,7 @@ Read [docs/architecture.md](docs/architecture.md) before touching any code.
 
 - Small, single-purpose files
 - Readability over brevity — straightforward, easy-to-follow code. No compact "one-liners" stretching across multiple lines (e.g. nested ternaries). Stretching across multiple lines is only allowed if it aids readability.
+- In prose, avoid facts that edits elsewhere silently invalidate — counts ("the seven examples above"), positions ("as shown below"), restated section names. Prefer edit-proof references: "the examples above", a link to the section.
 {%- if agentic_project_kind == 'code' %}
 - All routes and non-trivial functions: docstring contracts (params, returns, errors)
 - Test cases cover edge cases and every `@returns` line
