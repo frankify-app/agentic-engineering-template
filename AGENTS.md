@@ -47,6 +47,40 @@ Read [docs/architecture.md](docs/architecture.md) before touching any code.
 - Include relevant variable values in error messages, e.g. for JS/TS:
   `"Failed to fetch peers for workspace_id=${workspace_id}: ${e}"`
 
+### Avoid Duplication
+
+Duplicated code, prose, or configuration drifts:
+the copies start equal and diverge silently,
+and reviewers cannot tell which copy is authoritative.
+Every piece of knowledge gets ONE authoritative home;
+everywhere else, reference it — in this preference order:
+
+1. **Explicit reference (preferred):** machine-readable and resolvable —
+   an import/include, a hyperlink,
+   a repo path with section anchor (`docs/conventions.md#commit-types`).
+   Tooling and agents can follow it; link rot is detectable.
+2. **Semantic reference:** when no stable, resolvable target exists
+   (content in another repo without a fixed URL, a section that may move,
+   help text of a tool),
+   a prose pointer that names where the authority lives and how to find it —
+   e.g. "grammar authority: `docs/conventions.md` § Commit types"
+   or "behavior doc: `record.py --help`".
+
+Corollaries:
+
+- **Managed duplication is exempt but must be declared.**
+  Vendored copies, generated files, and template render output are allowed
+  BECAUSE they have a single source and a mechanical update path —
+  each copy must state its source and update mechanism (banner or comment).
+  An undeclared copy is a defect.
+- **Mirrored pairs that cannot reference each other**
+  (e.g. a self-contained prompt mirroring a schema,
+  a writer composing what a guard parses)
+  must both name the pairing and the authoritative side,
+  and change together in one PR.
+- **Review stance:** a second copy of anything without a declared source
+  is a finding, same severity as dead code.
+
 ## Skills
 
 Live in `.agents/skills/`. Synced using `npx skills update -p -y` — don't edit skill files, add repo-local overrides in AGENTS.md
