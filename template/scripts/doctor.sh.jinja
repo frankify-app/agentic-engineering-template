@@ -136,19 +136,19 @@ warn_tool {{ agentic_tracker_cli }} "not installed (deferred; agents use {{ agen
 {% endif -%}
 {% raw %}
 
-# Decision-memory contract (grilling skill): warn when the env var is unset;
+# Decision-memory contract (tools/record.py + grilling skill): warn when the env var is unset;
 # when set, a cheap ls-remote surfaces bad URLs / missing credentials now
 # instead of mid-session. No clone here — session-start shallow-clone is the
-# skill's job, per-session and ephemeral by design.
+# recorder's job, per-session and ephemeral by design.
 decision_memory_failed=false
 echo
-if [[ -z "${DECISION_MEMORY_REPO:-}" ]]; then
-    echo "⚠ DECISION_MEMORY_REPO — unset; grilling skill skips decision recording. Set it in your shell profile (local), the environment config (remote sessions), or a CI secret."
-elif GIT_TERMINAL_PROMPT=0 git ls-remote "$DECISION_MEMORY_REPO" >/dev/null 2>&1; then
-    echo "✓ DECISION_MEMORY_REPO (reachable)"
+if [[ -z "${DECISION_MEMORY_URL:-}" ]]; then
+    echo "⚠ DECISION_MEMORY_URL — unset; grilling skill skips decision recording. Set it (full git URL) in your shell profile (local), the environment config (remote sessions), or a CI secret."
+elif GIT_TERMINAL_PROMPT=0 git ls-remote "$DECISION_MEMORY_URL" >/dev/null 2>&1; then
+    echo "✓ DECISION_MEMORY_URL (reachable)"
     pass=$((pass + 1))
 else
-    echo "✗ DECISION_MEMORY_REPO — set but not reachable (bad URL or missing credentials): git ls-remote failed"
+    echo "✗ DECISION_MEMORY_URL — set but not reachable (bad URL or missing credentials): git ls-remote failed"
     fail=$((fail + 1))
     decision_memory_failed=true
 fi

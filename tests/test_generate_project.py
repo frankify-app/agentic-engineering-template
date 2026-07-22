@@ -40,6 +40,10 @@ def test_slug_auto_derived(
         defaults=True,
         unsafe=True,
         skip_tasks=True,
+        # Pin HEAD: with release tags present locally, copier would
+        # otherwise render the latest RELEASE instead of this branch
+        # (CI checkouts have no tags and already fall back to HEAD).
+        vcs_ref="HEAD",
     )
 
     assert (dst_path / "docs" / "glossary" / "my-cool-app.md").exists()
@@ -62,6 +66,10 @@ def _render(tmp_path: Path, answers: dict[str, str], dst_name: str) -> Path:
         defaults=True,
         unsafe=True,
         skip_tasks=True,
+        # Pin HEAD: with release tags present locally, copier would
+        # otherwise render the latest RELEASE instead of this branch
+        # (CI checkouts have no tags and already fall back to HEAD).
+        vcs_ref="HEAD",
     )
     return dst_path
 
@@ -290,6 +298,7 @@ def test_conventions_file_seeded_once_and_never_overwritten(
         unsafe=True,
         skip_tasks=True,
         overwrite=True,
+        vcs_ref="HEAD",
     )
     assert conventions.read_text() == "# Hand-written vault rules\n"
 
@@ -426,22 +435,22 @@ def test_grilling_pinned_to_frankify_derivation(
     assert grilling["skillPath"] == "derived/grilling/SKILL.md"
 
 
-def test_decision_memory_repo_env_var_contract(
+def test_decision_memory_url_env_var_contract(
     tmp_path: Path,
     base_answers: dict[str, str],
 ) -> None:
-    """DECISION_MEMORY_REPO is an env-var-only contract: no copier question,
+    """DECISION_MEMORY_URL is an env-var-only contract: no copier question,
     no value in any committed artifact (.copier-answers* included); AGENTS.md
     documents the contract and doctor.sh checks the env var."""
     # Even if a consumer passes a URL as copier data, it must render nowhere.
     stray_url = "https://github.com/acme/decision-memory"
-    answers = {**base_answers, "agentic_decision_memory_repo": stray_url}
+    answers = {**base_answers, "agentic_decision_memory_url": stray_url}
     dst_path = _render(tmp_path, answers, "decision-memory")
 
     for path in dst_path.rglob("*"):
         if path.is_file():
             assert stray_url not in path.read_text(), (
-                f"DECISION_MEMORY_REPO value leaked into {path}"
+                f"DECISION_MEMORY_URL value leaked into {path}"
             )
 
     # Not an init-time answer: no question, so nothing recorded on update.
@@ -451,11 +460,16 @@ def test_decision_memory_repo_env_var_contract(
     )
     _check_file_contents(
         dst_path / "AGENTS.md",
-        ["DECISION_MEMORY_REPO", "skips recording"],
+        ["DECISION_MEMORY_URL", "skips recording"],
     )
     _check_file_contents(
         dst_path / "scripts" / "doctor.sh",
-        ["DECISION_MEMORY_REPO", 'git ls-remote "$DECISION_MEMORY_REPO"'],
+        ["DECISION_MEMORY_URL", 'git ls-remote "$DECISION_MEMORY_URL"'],
+    )
+    _check_file_contents(
+        dst_path / "tools" / "record.py",
+        ["DECISION_MEMORY_URL"],
+        unexpect_strs=["DECISION_MEMORY_REPO"],
     )
 
 

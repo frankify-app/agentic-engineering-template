@@ -1,18 +1,35 @@
 # questions
+agentic_subtemplate:
+  type: str
+  help: >-
+    Which subtemplate to render: `template` is the full project scaffold;
+    `guard` stamps a decision-memory STORE — the CI guard (validator +
+    guard runner + workflow), the vendored store docs (conventions,
+    extraction prompt, README/AGENTS/CLAUDE), and a seeded preference
+    set. With `guard`, all project-scaffold questions are skipped,
+    keeping the store's answers file minimal.
+  choices:
+    - template
+    - guard
+  default: template
+
 agentic_project_name:
   type: str
   help: "Human-readable project name (agent docs, glossary)."
   placeholder: "My Project"
+  when: "{{ agentic_subtemplate == 'template' }}"
 
 agentic_project_description:
   type: str
   help: "Short project description (glossary seed entry)."
   placeholder: "A helpful project."
+  when: "{{ agentic_subtemplate == 'template' }}"
 
 agentic_project_slug:
   type: str
   help: "Project slug in kebab-case (repo URL, glossary path). Auto-derived from name; override if needed."
   default: "{{ agentic_project_name | lower | replace(' ', '-') | replace('_', '-') }}"
+  when: "{{ agentic_subtemplate == 'template' }}"
 
 agentic_project_kind:
   type: str
@@ -21,16 +38,19 @@ agentic_project_kind:
     - code
     - docs
   default: code
+  when: "{{ agentic_subtemplate == 'template' }}"
 
 agentic_language:
   type: str
   help: "Primary content language as an ISO 639-1 code (e.g. en, de). Language-sensitive tooling (codespell) is only rendered for English content."
   default: en
+  when: "{{ agentic_subtemplate == 'template' }}"
 
 agentic_disambiguate_version:
   type: str
   help: "Pinned disambiguate version (pre-alpha — breaking changes between releases; hook and docs commands use this pin)."
   default: "0.2.0"
+  when: "{{ agentic_subtemplate == 'template' }}"
 
 agentic_disambiguate_roots:
   type: str
@@ -40,6 +60,7 @@ agentic_disambiguate_roots:
     Empty keeps disambiguate's default roots. Kept as answer data so repos
     never patch the template-owned .pre-commit-config.yaml.
   default: ""
+  when: "{{ agentic_subtemplate == 'template' }}"
 
 agentic_precommit:
   type: str
@@ -48,6 +69,7 @@ agentic_precommit:
     - prek
     - none
   default: prek
+  when: "{{ agentic_subtemplate == 'template' }}"
 
 agentic_tracker_cli:
   type: str
@@ -57,6 +79,7 @@ agentic_tracker_cli:
     - gh
     - tea
   default: ghx
+  when: "{{ agentic_subtemplate == 'template' }}"
 
 agentic_forge:
   type: str
@@ -71,7 +94,7 @@ agentic_forge:
     {%- else -%}
     github
     {%- endif %}
-  when: "{{ not detect_forge() }}"
+  when: "{{ agentic_subtemplate == 'template' and not detect_forge() }}"
 
 agentic_forgejo_host:
   type: str
@@ -99,11 +122,12 @@ agentic_repo_owner:
     {%- else -%}
     {{ UNSET }}
     {%- endif %}
-  validator: "{% if not agentic_repo_owner %}Could not detect repo owner — run `gh auth login` or `git config github.user <login>`, or enter manually{% endif %}"
+  validator: "{% if agentic_subtemplate == 'template' and not agentic_repo_owner %}Could not detect repo owner — run `gh auth login` or `git config github.user <login>`, or enter manually{% endif %}"
+  when: "{{ agentic_subtemplate == 'template' }}"
 
 # Copier metadata
 _min_copier_version: "9.11.0"
-_subdirectory: template
+_subdirectory: "{{ agentic_subtemplate }}"
 # Keep the .claude/skills → ../.agents/skills bridge a symlink in generated
 # repos instead of copying (a copy would be empty — skills install post-render).
 _preserve_symlinks: true
@@ -111,17 +135,23 @@ _answers_file: .copier-answers.agentic.yml
 # Seeded once, never overwritten on `copier update` — rich repo-local rules
 # live there so AGENTS.md updates never conflict with hand-written content.
 _skip_if_exists:
-  - docs/conventions.md
+  - "{% if agentic_subtemplate == 'template' %}docs/conventions.md{% endif %}"
+  # The store's preference set is seeded once and owned by the store;
+  # everything else in the guard subtemplate is vendored (overwritten
+  # on copier update).
+  - "{% if agentic_subtemplate == 'guard' %}preferences.md{% endif %}"
 _jinja_extensions:
   - copier_template_extensions.TemplateExtensionLoader
   - extensions/agentic.py:AgenticExtension
 
+# Tasks are scaffold-only: the guard subtemplate stamps data-repo files
+# and must not install skills, run doctor, or register hooks there.
 _tasks:
-  - npx skills@latest experimental_install
-  - bash scripts/doctor.sh
+  - "{% if agentic_subtemplate == 'template' %}npx skills@latest experimental_install{% else %}true{% endif %}"
+  - "{% if agentic_subtemplate == 'template' %}bash scripts/doctor.sh{% else %}true{% endif %}"
   # Register prek git hooks so commits actually run them. A config file alone
   # does nothing — `prek install` must write .git/hooks. Guard on a git work
   # tree (copier may render into a plain dir) and on prek being selected.
   - >-
-    {% if agentic_precommit == 'prek' %}git rev-parse --is-inside-work-tree
+    {% if agentic_subtemplate == 'template' and agentic_precommit == 'prek' %}git rev-parse --is-inside-work-tree
     >/dev/null 2>&1 && prek install || true{% else %}true{% endif %}

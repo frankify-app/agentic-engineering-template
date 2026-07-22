@@ -33,6 +33,7 @@ COMMON_FILES = frozenset(
         "scripts/doctor.sh",
         "scripts/enable-agent-shims.sh",
         "skills-lock.json",
+        "tools/record.py",
     }
 )
 
@@ -199,6 +200,7 @@ def test_e2e_prek_install_registers_git_hooks(
         data=base_answers,
         defaults=True,
         unsafe=True,
+        vcs_ref="HEAD",
     )
 
     hook = dst_path / ".git" / "hooks" / "pre-commit"
@@ -226,6 +228,7 @@ def test_e2e_smoke_full_render_runs_tasks(
         data=base_answers,
         defaults=True,
         unsafe=True,
+        vcs_ref="HEAD",
     )
 
     # Post-render tasks add files (e.g. .agents/skills/), so the tree is a
