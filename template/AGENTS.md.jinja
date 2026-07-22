@@ -107,7 +107,7 @@ tokens as HTML, and single newlines render as hard line breaks rather
 than collapsing as in standard Markdown. Both silently corrupt
 tracker-posted content. The rules below cover tracker-posted content
 only — files committed to the repo (like this one) keep angle brackets
-and normal hard-wrapping.
+and follow "Prose in Repo Files" below.
 
 Placeholder syntax:
 
@@ -135,6 +135,31 @@ Repairing violations (applies to both rules):
   normal message (no explicit edit of an existing ticket needed — e.g.
   a new ticket, comment, or quoted text), fix it proactively and tell
   the user you did.
+
+### Prose in Repo Files
+
+Fixed-column wrapping of prose makes diffs explode:
+inserting a few words into a wrapped paragraph reflows every following line,
+so a one-word change renders as a whole-paragraph diff.
+These rules cover prose in repo FILES (Markdown files, code comments) only;
+tracker-posted content follows "Tracker Content Formatting" above.
+
+- **Semantic line breaks for Markdown prose:** in repo `.md` files,
+  break lines at sentence or clause boundaries
+  (one sentence or clause per line, per the sembr convention)
+  instead of wrapping at a fixed column.
+  Single newlines collapse when rendered, so output is identical;
+  diffs stay localized to the sentence actually edited.
+  Applies to NEW or REWRITTEN prose —
+  do not mass-reformat existing files just to comply.
+- **Never reflow untouched lines:** when editing an existing wrapped
+  paragraph (Markdown or code comments), change only the lines the edit
+  actually touches, even if the block ends up ragged.
+  If an insertion does not fit,
+  break the line at the insertion point rather than re-justifying the
+  paragraph.
+- **Deliberate mass reflows** (rare) go in an isolated `style:`-type
+  commit and are listed in `.git-blame-ignore-revs`.
 
 ### Agentic Engineering Workflow
 
