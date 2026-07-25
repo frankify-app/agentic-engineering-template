@@ -1,0 +1,6 @@
+{
+  "_comment": "Sources whose changes already pass a human review gate upstream may auto-update into this repo. Everything else is quarantined by scripts/update-skills.py for human review. Skills are executable instructions with full agent permissions — add a source only if you control its review gate.",
+  "trustedSources": [
+    "frankify-app/skills"
+  ]
+}
