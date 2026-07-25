@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import copier
-import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -59,9 +58,6 @@ def _render_guard(tmp_path: Path) -> Path:
     return dst_path
 
 
-@pytest.mark.xfail(
-    strict=True, reason="red: skill sits in .claude/, not the canonical dir"
-)
 def test_guard_render_produces_exactly_the_guard_files(tmp_path: Path) -> None:
     dst_path = _render_guard(tmp_path)
     rendered = {
@@ -120,9 +116,6 @@ def test_store_docs_are_vendored_and_preferences_seeded(
     assert preferences.read_text() == "# Active Preference Set\n\n- my rule\n"
 
 
-@pytest.mark.xfail(
-    strict=True, reason="red: no .claude/skills bridge in the guard render"
-)
 def test_guard_render_bridges_claude_skills_to_the_canonical_dir(
     tmp_path: Path,
 ) -> None:
