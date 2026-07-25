@@ -37,7 +37,15 @@ For any change touching a templated file, always follow this route:
 This doubles as a proving ground: the self-applied root files are the rendered
 template output, reviewed in the same PR as the template change.
 
-Exception: root files that intentionally diverge from the template for
-template-development needs (currently `.pre-commit-config.yaml`, which carries
-jinja lint hooks) are NOT overwritten by self-application — keep maintaining
-them by hand and list them here when adding new ones.
+Exception: root files that intentionally diverge from the template are NOT
+overwritten by self-application. The authoritative list is
+`DELIBERATE_DIVERGENCE` in `tests/test_self_application.py`, which fails the
+build when the root and the render disagree anywhere else — so adding a
+template file forces a decision: adopt it at root, or list it with a reason.
+Paths in copier's `_skip_if_exists` are excluded structurally (they are seeded
+once and can never match) rather than listed as choices.
+
+Step 3 is not optional. The shared glossary terms live under
+`template/docs/glossary/`, which is never a glossary root, so they become real
+terms only once stamped into this repo's own `docs/glossary/`. A stale stamp
+means the glossary being linted is not the glossary being shipped.
