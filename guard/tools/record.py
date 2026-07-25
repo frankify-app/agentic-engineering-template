@@ -248,6 +248,15 @@ def run_git(repo_dir: Path, *args: str) -> str:
     return result.stdout
 
 
+def store_root() -> Path:
+    """The store checkout this recorder lives in.
+
+    Returns the repository root (this file is at <root>/tools/record.py).
+    Raises SystemExit when that root is not a git checkout.
+    """
+    raise NotImplementedError
+
+
 def resolve_repo_dir(args: argparse.Namespace) -> Path:
     raw = args.dir or os.environ.get("DECISION_MEMORY_DIR")
     if not raw:
