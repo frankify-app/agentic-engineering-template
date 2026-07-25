@@ -405,6 +405,42 @@ def check_store_checkout(repo_dir: Path, url: str) -> None:
         )
 
 
+def default_branch(repo_dir: Path) -> str:
+    """The store's default branch, as origin advertises it.
+
+    Returns the short name (e.g. "main"). Asks the remote once when the
+    clone has no origin/HEAD recorded. Raises SystemExit when origin
+    advertises no default branch at all.
+    """
+    for refresh in (False, True):
+        if refresh:
+            # Harmless when origin/HEAD is already set; needed for
+            # clones made before the remote had any branches.
+            subprocess.run(
+                ["git", "-C", str(repo_dir), "remote", "set-head", "origin", "--auto"],
+                capture_output=True,
+                text=True,
+            )
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_dir),
+                "symbolic-ref",
+                "--short",
+                "refs/remotes/origin/HEAD",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip().split("/", 1)[1]
+    raise fail(
+        f"{repo_dir}: origin advertises no default branch — cannot pick a "
+        "base for the session branch"
+    )
+
+
 def cmd_open(args: argparse.Namespace) -> int:
     url = os.environ.get("DECISION_MEMORY_URL")
     if not url:
@@ -416,9 +452,17 @@ def cmd_open(args: argparse.Namespace) -> int:
     repo_dir = store_root()
     check_store_checkout(repo_dir, url)
 
-    base_commit = run_git(repo_dir, "rev-parse", "HEAD").strip()
+    # DECISION: the session branch is based on origin/<default>, never
+    # on HEAD. A checkout parked on a previous session's unmerged
+    # branch is the normal state of any reused checkout, and branching
+    # from it silently folds that session's records into this one's PR
+    # (#64).
+    base = default_branch(repo_dir)
+    run_git(repo_dir, "fetch", "--quiet", "origin", base)
+    base_ref = f"origin/{base}"
+    base_commit = run_git(repo_dir, "rev-parse", base_ref).strip()
     branch = "session/" + now.strftime("%Y%m%dT%H%M%SZ")
-    run_git(repo_dir, "checkout", "-b", branch)
+    run_git(repo_dir, "checkout", "--quiet", "-b", branch, base_ref)
 
     session = args.session or os.environ.get("CLAUDE_SESSION_ID")
     # DECISION: session state lives inside the ephemeral clone

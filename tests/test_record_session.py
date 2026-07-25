@@ -73,7 +73,6 @@ def parked_store(tmp_path: Path) -> Path:
     return store
 
 
-@pytest.mark.xfail(strict=True, reason="red: open branches off HEAD, not the default")
 def test_open_bases_the_session_on_the_default_branch(
     parked_store: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
