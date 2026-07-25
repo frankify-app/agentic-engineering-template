@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import copier
+import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -114,6 +115,27 @@ def test_store_docs_are_vendored_and_preferences_seeded(
         vcs_ref="HEAD",
     )
     assert preferences.read_text() == "# Active Preference Set\n\n- my rule\n"
+
+
+@pytest.mark.xfail(strict=True, reason="red: store.config.json is not store-owned yet")
+def test_store_config_survives_a_re_render(tmp_path: Path) -> None:
+    """The knobs are the store's to tune, so `copier update` must never
+    revert a human's budget back to the template's seed."""
+    dst_path = _render_guard(tmp_path)
+    config = dst_path / "store.config.json"
+    tuned = '{"budget_tokens": 1500, "replay_window": 40}\n'
+    config.write_text(tuned)
+    copier.run_copy(
+        src_path=str(PROJECT_ROOT),
+        dst_path=dst_path,
+        data={"agentic_subtemplate": "guard"},
+        defaults=True,
+        unsafe=True,
+        skip_tasks=True,
+        overwrite=True,
+        vcs_ref="HEAD",
+    )
+    assert config.read_text() == tuned
 
 
 def test_default_render_contains_no_guard_files(
