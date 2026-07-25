@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import copier
-import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -59,7 +58,6 @@ def _render_guard(tmp_path: Path) -> Path:
     return dst_path
 
 
-@pytest.mark.xfail(strict=True, reason="red: store layer not yet vendored into guard/")
 def test_guard_render_produces_exactly_the_guard_files(tmp_path: Path) -> None:
     dst_path = _render_guard(tmp_path)
     rendered = {

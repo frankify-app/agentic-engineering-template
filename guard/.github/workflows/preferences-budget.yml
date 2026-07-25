@@ -1,0 +1,82 @@
+name: Preference budget
+
+# Copier-vendored from the agentic-engineering-template guard
+# subtemplate. Token-counts preferences.md on
+# every push to main and keeps a single pinned "compression due" issue
+# in sync: opened/updated at or above the warn threshold, closed once
+# the file is back under it. The hard stop (>100% blocks PRs touching
+# the file) lives in preferences-guard.yml — this workflow only
+# reports.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - preferences.md
+      - store.config.json
+      - .github/store/**
+      - .github/workflows/preferences-budget.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Measure
+        id: budget
+        run: python .github/store/budget.py --format github
+
+      - name: Sync the compression-due issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          LEVEL: ${{ steps.budget.outputs.level }}
+          PERCENT: ${{ steps.budget.outputs.percent }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          label="$(python -c "import json;print(json.load(open('store.config.json'))['budget_issue_label'])")"
+          title="preferences.md compression due"
+
+          gh label create "$label" \
+            --description "Automated preference-set budget status" \
+            --color FBCA04 2>/dev/null || true
+
+          number="$(gh issue list --label "$label" --state open \
+            --json number --jq '.[0].number // empty')"
+
+          if [ "$LEVEL" = "ok" ]; then
+            if [ -n "$number" ]; then
+              gh issue comment "$number" --body \
+                "Back under the warn threshold (${PERCENT}% of budget) at ${SHA}. Closing."
+              gh issue close "$number" --reason completed
+            fi
+            echo "preferences.md at ${PERCENT}% of budget — nothing to do."
+            exit 0
+          fi
+
+          python .github/store/budget.py --issue-body --sha "$SHA" > "$RUNNER_TEMP/body.md"
+
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body-file "$RUNNER_TEMP/body.md"
+            echo "Updated issue #${number} (${PERCENT}% of budget)."
+          else
+            url="$(gh issue create --title "$title" --label "$label" \
+              --body-file "$RUNNER_TEMP/body.md")"
+            number="${url##*/}"
+            echo "Opened issue #${number} (${PERCENT}% of budget)."
+            # Pinning is best-effort: a repo may already hold the
+            # maximum of three pinned issues.
+            node_id="$(gh issue view "$number" --json id --jq .id)"
+            gh api graphql -f query='mutation($id:ID!){pinIssue(input:{issueId:$id}){issue{number}}}' \
+              -F id="$node_id" || echo "Could not pin issue #${number} (not fatal)."
+          fi
