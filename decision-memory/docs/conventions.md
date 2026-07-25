@@ -240,7 +240,7 @@ pref-confirm: rejects new infrastructure dependencies (n=4)
 ## CI guards
 
 `.github/guards/` — copier-vendored from the
-agentic-engineering-template guard subtemplate (single shared source;
+agentic-engineering-template decision-memory subtemplate (single shared source;
 the writer tool imports the same validator from its session clone).
 Stdlib-only, no dependencies; fails soft on factory loss. Checks:
 

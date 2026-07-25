@@ -17,7 +17,7 @@ is deliberately no chat-side validator to drift.
 
 This prompt mirrors the record schema in
 [conventions.md](conventions.md); both are vendored from the template
-repo's store subtemplate — change them together there, in the same
+repo's decision-memory subtemplate — change them together there, in the same
 PR.
 
 ````text

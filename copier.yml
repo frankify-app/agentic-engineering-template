@@ -3,14 +3,15 @@ agentic_subtemplate:
   type: str
   help: >-
     Which subtemplate to render: `template` is the full project scaffold;
-    `guard` stamps a decision-memory STORE — the CI guard (validator +
-    guard runner + workflow), the vendored store docs (conventions,
-    extraction prompt, README/AGENTS/CLAUDE), and a seeded preference
-    set. With `guard`, all project-scaffold questions are skipped,
+    `decision-memory` stamps a decision-memory STORE — the recorder, the
+    CI guards (validator + guard runner + workflow), the preference-set
+    lifecycle (budget, carve-out gate, replay, compaction skill), the
+    vendored store docs, and a seeded preference set. With
+    `decision-memory`, all project-scaffold questions are skipped,
     keeping the store's answers file minimal.
   choices:
     - template
-    - guard
+    - decision-memory
   default: template
 
 agentic_project_name:
@@ -136,15 +137,16 @@ _answers_file: .copier-answers.agentic.yml
 # live there so AGENTS.md updates never conflict with hand-written content.
 _skip_if_exists:
   - "{% if agentic_subtemplate == 'template' %}docs/conventions.md{% endif %}"
-  # The store's preference set is seeded once and owned by the store;
-  # everything else in the guard subtemplate is vendored (overwritten
-  # on copier update).
-  - "{% if agentic_subtemplate == 'guard' %}preferences.md{% endif %}"
+  # The store's preference set and its config knobs are seeded once and
+  # owned by the store; everything else in the decision-memory subtemplate is
+  # vendored (overwritten on copier update).
+  - "{% if agentic_subtemplate == 'decision-memory' %}preferences.md{% endif %}"
+  - "{% if agentic_subtemplate == 'decision-memory' %}store.config.json{% endif %}"
 _jinja_extensions:
   - copier_template_extensions.TemplateExtensionLoader
   - extensions/agentic.py:AgenticExtension
 
-# Tasks are scaffold-only: the guard subtemplate stamps data-repo files
+# Tasks are scaffold-only: the decision-memory subtemplate stamps data-repo files
 # and must not install skills, run doctor, or register hooks there.
 _tasks:
   - "{% if agentic_subtemplate == 'template' %}npx skills@latest experimental_install{% else %}true{% endif %}"

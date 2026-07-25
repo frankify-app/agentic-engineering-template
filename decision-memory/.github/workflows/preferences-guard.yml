@@ -1,0 +1,47 @@
+name: Preference guards
+
+# Copier-vendored from the agentic-engineering-template guard
+# subtemplate, like guards.yml next door.
+# Adds the compaction flow's PR rules on top of the record guard:
+# the carve-out label for rewriting existing preferences.md lines, the
+# replay-regression report a carve-out PR must carry, and the hard
+# budget stop. See .github/store/README.md.
+
+on:
+  pull_request:
+    # Labels and the description are inputs to this guard, so re-run
+    # when either changes — not just on new commits.
+    types: [opened, reopened, synchronize, labeled, unlabeled, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  preference-guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # Full history: the guard inspects every PR commit's
+          # preferences.md diff individually.
+          fetch-depth: 0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Store layer self-test
+        run: python .github/store/tests/test_store.py
+
+      - name: Preference guards
+        env:
+          # Via env, never inline in the script: the PR description is
+          # attacker-controlled text.
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr-body.md"
+          python .github/store/preferences_guard.py \
+            --base "$BASE_SHA" \
+            --labels "$PR_LABELS" \
+            --body-file "$RUNNER_TEMP/pr-body.md"

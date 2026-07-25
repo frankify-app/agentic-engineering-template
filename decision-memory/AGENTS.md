@@ -5,10 +5,13 @@
 > template and pull via `copier update`.
 
 Private decision store for one principal (a person or a team):
-records, preferences, and the CI guards protecting them. Data-only — no writer tooling lives here
-(the recorder lives in the agentic-engineering-template repo; its
-`--help` is the authoritative behavior doc, design history in that
-repo's issue #37).
+records, preferences, the CI guards protecting them,
+and the recorder that writes them.
+The data is this repo's; every line of code around it is vendored from
+the agentic-engineering-template decision-memory subtemplate,
+so N stores cannot drift from one schema.
+`tools/record.py --help` is the recorder's authoritative behavior doc
+(design history in that repo's issue #37).
 
 ## Golden rules
 
@@ -19,8 +22,10 @@ authoritative contract.
   existing record. CI rejects it; do not try.
 - Inject `preferences.md` ONLY into agent context — never
   `decisions/` wholesale.
-- Write records through the recorder (`tools/record.py` in
-  template-instantiated repos). Hand-written records are allowed;
+- Write records through the recorder (`tools/record.py`, here in this
+  repo). It operates on the checkout it lives in, so run this copy —
+  clone the store fresh per session rather than reusing a checkout
+  parked on someone else's branch. Hand-written records are allowed;
   they get no help and face the same guards.
 - `preferences.md` may only change via counter-line bumps
   (`pref-confirm`) or human promotion (`pref-promote`). Promotion is
@@ -50,6 +55,6 @@ authoritative contract.
 - [docs/extraction-prompt.md](docs/extraction-prompt.md) — paste into
   any chat to extract draft records from a past conversation.
 - `.github/guards/`, the docs, and this file are vendored from the
-  template repo's store subtemplate; update via `copier update`,
+  template repo's decision-memory subtemplate; update via `copier update`,
   reviewed here as a normal PR diff. Only `preferences.md` (and the
   records) are owned by this store.

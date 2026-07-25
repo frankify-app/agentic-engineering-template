@@ -1,0 +1,8 @@
+{
+  "_comment": "Store-owned, human-adjustable knobs. See .github/store/README.md.",
+  "budget_tokens": 2000,
+  "warn_at_percent": 80,
+  "carve_out_label": "preferences-carve-out",
+  "budget_issue_label": "preferences-budget",
+  "replay_window": 20
+}

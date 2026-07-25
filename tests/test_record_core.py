@@ -20,11 +20,11 @@ from tests.conftest import load_module
 PROJECT_ROOT = Path(__file__).parent.parent
 
 record_tool = load_module(
-    "record_tool", PROJECT_ROOT / "template" / "tools" / "record.py"
+    "record_tool", PROJECT_ROOT / "decision-memory" / "tools" / "record.py"
 )
 dv = load_module(
     "decision_validator",
-    PROJECT_ROOT / "guard" / ".github" / "guards" / "decision_validator.py",
+    PROJECT_ROOT / "decision-memory" / ".github" / "guards" / "decision_validator.py",
 )
 
 NOW = dt.datetime(2026, 7, 21, 14, 32, 5, tzinfo=dt.timezone.utc)
@@ -228,3 +228,19 @@ def test_resolve_batch_refs_rejects_unknown_drill_down_slug() -> None:
     d["drill_down_of_slug"] = "not-in-batch"
     with pytest.raises(ValueError):
         record_tool.resolve_batch_refs([d], NOW)
+
+
+def test_recorder_operates_on_the_checkout_it_lives_in(tmp_path: Path) -> None:
+    """The store checkout is the tool's own home.
+
+    The recorder ships inside a store, so `which checkout?` has exactly
+    one answer: the one this file sits in.
+    """
+    store = tmp_path / "decision-memory"
+    (store / "tools").mkdir(parents=True)
+    (store / ".git").mkdir()
+    (store / "tools" / "record.py").write_text(
+        (PROJECT_ROOT / "decision-memory" / "tools" / "record.py").read_text()
+    )
+    relocated = load_module("relocated_record", store / "tools" / "record.py")
+    assert relocated.store_root() == store

@@ -15,7 +15,7 @@ as any other template change.
   the graph breaks.
 - **A separate `glossary` subtemplate applied alongside the scaffold** —
   implemented first, then withdrawn. It bought one thing: a non-scaffold repo
-  (e.g. a `guard`-stamped decision store) could consume the terms from a
+  (e.g. a `decision-memory`-stamped store) could consume the terms from a
   single copy. It cost a second answers file and a second `copier update` per
   consumer forever, a normal update that silently did *not* carry glossary
   changes, a source directory that was not lintable, a name colliding with
@@ -44,5 +44,6 @@ as any other template change.
   the glossary being shipped, so self-application is enforced by a test rather
   than left to convention.
 - Only repos rendering the `template` subtemplate receive the terms. A
-  `guard`-stamped store would need a `guard/docs/glossary/` copy and an
+  `decision-memory`-stamped store would need a
+  `decision-memory/docs/glossary/` copy and an
   equality guard, added if and when that consumer exists.

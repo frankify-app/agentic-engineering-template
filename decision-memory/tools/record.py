@@ -9,17 +9,17 @@ backfilled decision records). The contract this tool must satisfy
 decision-memory repo's docs/conventions.md and CI guards.
 
 Verbs:
-  open     make the store repo available — clone it into an ephemeral
-           temp dir, or reuse an already-attached checkout
-           (--use <path>, matched against DECISION_MEMORY_URL by
-           owner/repo) where cloning is impossible (e.g. managed
-           environments); capture the preference-set SHA, create the
+  open     start a recording session in this store checkout — verify
+           it is the store (origin matched against DECISION_MEMORY_URL
+           by owner/repo tail, since managed environments rewrite
+           remotes), capture the preference-set SHA, create the
            session branch, run the stateless closed-unmerged-PR sweep
   record   mint + validate + write one decision record per input
            draft (stdin JSON object/array, or --from drafts.json),
-           one commit per record; batch-local slug references
-           (supersedes_slug, drill_down_of_slug, related_slugs)
-           resolve to the minted IDs
+           one commit per record, each pushed as it lands so the
+           clone holds nothing the remote does not; batch-local slug
+           references (supersedes_slug, drill_down_of_slug,
+           related_slugs) resolve to the minted IDs
   check    validate the entire decisions/ corpus + dangling refs +
            preferences.md token budget
   submit   compute two-stream hit rates (refined and near-tie
@@ -29,8 +29,19 @@ Verbs:
   propose  write a preference-rule proposal file with its commit
 
 Configuration: DECISION_MEMORY_URL (full git URL of the data repo;
-never commit it anywhere public). Verbs after `open` find the clone
-via DECISION_MEMORY_DIR or --dir.
+never commit it anywhere public).
+
+The recorder ships inside the store and always operates on the
+checkout it lives in. Clone the store, then run its copy:
+
+    git clone "$DECISION_MEMORY_URL" <dir>
+    python <dir>/tools/record.py open
+
+Clone fresh per session rather than reusing an attached checkout: a
+fresh clone is clean and on the default branch, which is what keeps a
+session's PR to that session's own records. Where cloning is
+impossible, run the copy inside whatever store checkout is available
+— same invariant, no special flag.
 
 Stdlib only. The file is split into a pure CONTRACT CORE (the dojo
 lift-target) and an IO SHELL; keep the seam strict.
@@ -47,7 +58,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 # ========================== contract core ==========================
@@ -248,16 +258,24 @@ def run_git(repo_dir: Path, *args: str) -> str:
     return result.stdout
 
 
-def resolve_repo_dir(args: argparse.Namespace) -> Path:
-    raw = args.dir or os.environ.get("DECISION_MEMORY_DIR")
-    if not raw:
-        raise fail(
-            "no clone found — run `record.py open` first, then pass --dir "
-            "or export DECISION_MEMORY_DIR as it prints"
-        )
-    repo_dir = Path(raw)
+def store_root() -> Path:
+    """The store checkout this recorder lives in.
+
+    Returns the repository root (this file is at <root>/tools/record.py).
+    Raises SystemExit when that root is not a git checkout.
+
+    DECISION: the recorder always operates on its own checkout. It is
+    stamped into stores by the decision-memory subtemplate, so "which checkout?"
+    has exactly one answer and needs no flag, env var or search to
+    resolve.
+    """
+    repo_dir = Path(__file__).resolve().parents[1]
     if not (repo_dir / ".git").exists():
-        raise fail(f"{repo_dir} is not a git clone")
+        raise fail(
+            f"{repo_dir} is not a git checkout — run the copy of record.py "
+            "inside a decision-memory store clone, not a loose copy of the "
+            "file (clone the store first: git clone $DECISION_MEMORY_URL)"
+        )
     return repo_dir
 
 
@@ -276,8 +294,8 @@ def load_validator(repo_dir: Path):
     if not path.exists():
         raise fail(
             f"vendored validator missing at {path} — the data repo must "
-            "vendor the guard subtemplate (copier update from the "
-            "agentic-engineering-template guard subtemplate)"
+            "vendor the decision-memory subtemplate (copier update from the "
+            "agentic-engineering-template decision-memory subtemplate)"
         )
     spec = importlib.util.spec_from_file_location("decision_validator", path)
     if spec is None or spec.loader is None:
@@ -365,23 +383,62 @@ def covered_closures(records: dict[str, dict]) -> set[int]:
     }
 
 
-def _attach_checkout(path_arg: str, url: str) -> Path:
-    """Validate an already-available checkout of the store repo."""
-    repo_dir = Path(path_arg).resolve()
-    if not (repo_dir / ".git").exists():
-        raise fail(f"--use {repo_dir}: not a git checkout")
+def check_store_checkout(repo_dir: Path, url: str) -> None:
+    """Confirm this checkout is the store, and is safe to record into.
+
+    Raises SystemExit when origin does not match DECISION_MEMORY_URL or
+    the worktree is dirty.
+    """
     origin = run_git(repo_dir, "config", "--get", "remote.origin.url").strip()
+    # DECISION: matched by owner/repo tail, not textually — managed
+    # environments rewrite remotes through a local proxy, so a
+    # proxy-rewritten origin never equals the configured URL.
     if repo_url_tail(origin) != repo_url_tail(url):
         raise fail(
-            f"--use {repo_dir}: origin {origin!r} is not the store repo "
+            f"{repo_dir}: origin {origin!r} is not the store repo "
             f"(DECISION_MEMORY_URL points at {repo_url_tail(url)!r})"
         )
     if run_git(repo_dir, "status", "--porcelain").strip():
         raise fail(
-            f"--use {repo_dir}: worktree is dirty — commit or stash "
-            "before opening a recording session in it"
+            f"{repo_dir}: worktree is dirty — commit or stash before "
+            "opening a recording session in it"
         )
-    return repo_dir
+
+
+def default_branch(repo_dir: Path) -> str:
+    """The store's default branch, as origin advertises it.
+
+    Returns the short name (e.g. "main"). Asks the remote once when the
+    clone has no origin/HEAD recorded. Raises SystemExit when origin
+    advertises no default branch at all.
+    """
+    for refresh in (False, True):
+        if refresh:
+            # Harmless when origin/HEAD is already set; needed for
+            # clones made before the remote had any branches.
+            subprocess.run(
+                ["git", "-C", str(repo_dir), "remote", "set-head", "origin", "--auto"],
+                capture_output=True,
+                text=True,
+            )
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_dir),
+                "symbolic-ref",
+                "--short",
+                "refs/remotes/origin/HEAD",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip().split("/", 1)[1]
+    raise fail(
+        f"{repo_dir}: origin advertises no default branch — cannot pick a "
+        "base for the session branch"
+    )
 
 
 def cmd_open(args: argparse.Namespace) -> int:
@@ -392,27 +449,20 @@ def cmd_open(args: argparse.Namespace) -> int:
             "your decision-memory repo (never commit it anywhere public)"
         )
     now = dt.datetime.now(dt.timezone.utc)
-    if args.use:
-        repo_dir = _attach_checkout(args.use, url)
-        print(f"Reusing attached checkout: {repo_dir}")
-    else:
-        repo_dir = Path(tempfile.mkdtemp(prefix="decision-memory-"))
-        result = subprocess.run(
-            ["git", "clone", "--depth", "1", url, str(repo_dir)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise fail(
-                f"clone failed:\n{result.stderr}\n"
-                "If the store repo is already available in this session "
-                "(e.g. attached in a managed environment where outbound "
-                "cloning is blocked), re-run: open --use <path-to-checkout>"
-            )
+    repo_dir = store_root()
+    check_store_checkout(repo_dir, url)
 
-    base_commit = run_git(repo_dir, "rev-parse", "HEAD").strip()
+    # DECISION: the session branch is based on origin/<default>, never
+    # on HEAD. A checkout parked on a previous session's unmerged
+    # branch is the normal state of any reused checkout, and branching
+    # from it silently folds that session's records into this one's PR
+    # (#64).
+    base = default_branch(repo_dir)
+    run_git(repo_dir, "fetch", "--quiet", "origin", base)
+    base_ref = f"origin/{base}"
+    base_commit = run_git(repo_dir, "rev-parse", base_ref).strip()
     branch = "session/" + now.strftime("%Y%m%dT%H%M%SZ")
-    run_git(repo_dir, "checkout", "-b", branch)
+    run_git(repo_dir, "checkout", "--quiet", "-b", branch, base_ref)
 
     session = args.session or os.environ.get("CLAUDE_SESSION_ID")
     # DECISION: session state lives inside the ephemeral clone
@@ -462,7 +512,6 @@ def cmd_open(args: argparse.Namespace) -> int:
         "Reminder: inject preferences.md (and ONLY preferences.md) into "
         "the session context now, if not already injected."
     )
-    print(f"export DECISION_MEMORY_DIR={repo_dir}")
     return 0
 
 
@@ -481,12 +530,38 @@ def commit_record(repo_dir: Path, record: dict) -> None:
     # (§ Commit types); the vendored guard lints what this composes.
     subject = f"decision({record['project']}): {slug} — {chosen}"
     run_git(repo_dir, "add", str(path))
-    run_git(repo_dir, "commit", "-m", subject)
+    run_git(repo_dir, "commit", "--quiet", "-m", subject)
+    push_session(repo_dir)
     print(f"Recorded {record_id} ({subject})")
 
 
+def push_session(repo_dir: Path) -> None:
+    """Publish the session branch as it stands.
+
+    DECISION: every record is pushed the moment it is committed, so the
+    clone holds nothing the remote does not. Sessions run in ephemeral
+    clones — that is what makes the clone disposable and its location
+    irrelevant, instead of a durability question.
+
+    Raises SystemExit when the push fails: a silently unpushed record
+    is exactly the loss this is here to prevent.
+    """
+    branch = run_git(repo_dir, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    result = subprocess.run(
+        ["git", "-C", str(repo_dir), "push", "--quiet", "-u", "origin", branch],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise fail(
+            f"pushing {branch} to origin failed:\n{result.stderr}\n"
+            "The record is committed locally but not published — retry, or "
+            "push manually before this clone goes away."
+        )
+
+
 def cmd_record(args: argparse.Namespace) -> int:
-    repo_dir = resolve_repo_dir(args)
+    repo_dir = store_root()
     state = load_state(repo_dir)
     validator = load_validator(repo_dir)
     now = dt.datetime.now(dt.timezone.utc)
@@ -528,7 +603,7 @@ def cmd_record(args: argparse.Namespace) -> int:
 
 
 def cmd_check(args: argparse.Namespace) -> int:
-    repo_dir = resolve_repo_dir(args)
+    repo_dir = store_root()
     validator = load_validator(repo_dir)
 
     errors: list[str] = []
@@ -682,7 +757,7 @@ def build_pr_body(records: list[dict], streams: dict[str, dict[str, int]]) -> st
 
 
 def cmd_submit(args: argparse.Namespace) -> int:
-    repo_dir = resolve_repo_dir(args)
+    repo_dir = store_root()
     state = load_state(repo_dir)
     validator = load_validator(repo_dir)
     branch = state["branch"]
@@ -735,7 +810,9 @@ def cmd_submit(args: argparse.Namespace) -> int:
             run_git(repo_dir, "commit", "-m", f"pref-confirm: {rule} (n={count})")
             print(f"pref-confirm: {rule} (n={count})")
 
-    run_git(repo_dir, "push", "-u", "origin", branch)
+    # Records were pushed as they landed; this catches the counter
+    # bumps above and is a no-op when there were none.
+    push_session(repo_dir)
     print(f"Pushed {branch}.")
 
     title = f"decision session {branch.split('/', 1)[1]} — " + (
@@ -783,7 +860,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
 
 
 def cmd_propose(args: argparse.Namespace) -> int:
-    repo_dir = resolve_repo_dir(args)
+    repo_dir = store_root()
     today = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
     rule = " ".join(args.rule.split())
     slug = args.slug or re.sub(
@@ -815,22 +892,12 @@ def main(argv: list[str] | None = None) -> int:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
-        "--dir",
-        help="path to the session clone (default: $DECISION_MEMORY_DIR)",
-    )
     sub = parser.add_subparsers(dest="verb", required=True)
 
     p_open = sub.add_parser("open", help="start a recording session")
     p_open.add_argument(
         "--session",
         help="opaque session grouping key (default: $CLAUDE_SESSION_ID)",
-    )
-    p_open.add_argument(
-        "--use",
-        help="reuse an already-available checkout of the store repo "
-        "instead of cloning (validated against DECISION_MEMORY_URL by "
-        "owner/repo; worktree must be clean)",
     )
     p_open.set_defaults(func=cmd_open)
 

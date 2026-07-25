@@ -7,7 +7,7 @@ from pathlib import Path
 from tests.conftest import load_module
 
 PROJECT_ROOT = Path(__file__).parent.parent
-GUARDS_PATH = PROJECT_ROOT / "guard" / ".github" / "guards" / "guards.py"
+GUARDS_PATH = PROJECT_ROOT / "decision-memory" / ".github" / "guards" / "guards.py"
 
 guards = load_module("guards", GUARDS_PATH)
 

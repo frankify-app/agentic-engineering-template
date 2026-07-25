@@ -1,6 +1,6 @@
 """Fixture tests for the single-source decision-record validator.
 
-The validator is the guard subtemplate's core (vendored into the
+The validator is the decision-memory subtemplate's core (vendored into the
 decision-memory repo via copier); every change to it must pass these
 tests in this repo's CI before it can be vendored downstream.
 """
@@ -14,7 +14,9 @@ import pytest
 from tests.conftest import load_module
 
 PROJECT_ROOT = Path(__file__).parent.parent
-VALIDATOR_PATH = PROJECT_ROOT / "guard" / ".github" / "guards" / "decision_validator.py"
+VALIDATOR_PATH = (
+    PROJECT_ROOT / "decision-memory" / ".github" / "guards" / "decision_validator.py"
+)
 
 dv = load_module("decision_validator", VALIDATOR_PATH)
 

@@ -466,11 +466,6 @@ def test_decision_memory_url_env_var_contract(
         dst_path / "scripts" / "doctor.sh",
         ["DECISION_MEMORY_URL", 'git ls-remote "$DECISION_MEMORY_URL"'],
     )
-    _check_file_contents(
-        dst_path / "tools" / "record.py",
-        ["DECISION_MEMORY_URL"],
-        unexpect_strs=["DECISION_MEMORY_REPO"],
-    )
 
 
 def test_copier_has_no_decision_memory_question() -> None:
