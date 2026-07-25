@@ -1,7 +1,9 @@
 """Render tests for the guard subtemplate (agentic_subtemplate=guard).
 
-The guard subtemplate vendors the decision-memory CI guard — and
-nothing else — into a data repo, keyed by a minimal answers file.
+The guard subtemplate vendors everything a decision-memory store
+needs — CI guard, store docs, the preference-set lifecycle layer, and
+the recorder that writes to it — into a data repo, keyed by a minimal
+answers file.
 """
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import copier
+import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -25,6 +28,7 @@ GUARD_FILES = frozenset(
         "docs/conventions.md",
         "docs/extraction-prompt.md",
         "preferences.md",
+        "tools/record.py",
     }
 )
 
@@ -45,6 +49,7 @@ def _render_guard(tmp_path: Path) -> Path:
     return dst_path
 
 
+@pytest.mark.xfail(strict=True, reason="red: recorder not yet moved into guard/")
 def test_guard_render_produces_exactly_the_guard_files(tmp_path: Path) -> None:
     dst_path = _render_guard(tmp_path)
     rendered = {
@@ -109,3 +114,13 @@ def test_default_render_contains_no_guard_files(
     dst_path = render_project()
     assert not (dst_path / ".github" / "guards").exists()
     assert not (dst_path / ".github" / "workflows" / "guards.yml").exists()
+
+
+@pytest.mark.xfail(strict=True, reason="red: recorder not yet moved out of template/")
+def test_default_render_contains_no_recorder(
+    render_project,
+) -> None:
+    """The recorder is store tooling: it ships to decision-memory
+    stores through the guard subtemplate, never to consumer repos."""
+    dst_path = render_project()
+    assert not (dst_path / "tools" / "record.py").exists()
