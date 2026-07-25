@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import copier
+import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -515,4 +516,30 @@ def test_lint_workflow_without_prek_keeps_marker_check(
         dst_path / ".github" / "workflows" / "lint.yml",
         ["git grep -nE", "::error::"],
         unexpect_strs=["prek"],
+    )
+
+
+@pytest.mark.xfail(strict=True)
+def test_prek_bootstrap_rendered_and_wired(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """Template#53: prek enforcement ships with every prek-enabled render.
+
+    Copier's generation-time `prek install` task does not survive a fresh
+    `git clone`, so remote agent sessions need a SessionStart bootstrap.
+    """
+    dst_path = _render(tmp_path, base_answers, "prek-bootstrap")
+
+    assert (dst_path / "scripts" / "ensure-prek.sh").exists()
+    settings = json.loads((dst_path / ".claude" / "settings.json").read_text())
+    commands = [
+        hook["command"]
+        for group in settings["hooks"]["SessionStart"]
+        for hook in group["hooks"]
+    ]
+    assert any("ensure-prek.sh" in command for command in commands)
+    _check_file_contents(
+        dst_path / "AGENTS.md",
+        expected_strs=["prek run --all-files", "chore(stub):"],
     )
