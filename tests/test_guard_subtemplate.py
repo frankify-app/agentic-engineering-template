@@ -11,12 +11,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import copier
+import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
 GUARD_FILES = frozenset(
     {
-        ".claude/skills/compact-preferences/SKILL.md",
+        ".agents/skills/compact-preferences/SKILL.md",
         ".copier-answers.agentic.yml",
         ".github/guards/decision_validator.py",
         ".github/guards/guards.py",
@@ -58,6 +59,9 @@ def _render_guard(tmp_path: Path) -> Path:
     return dst_path
 
 
+@pytest.mark.xfail(
+    strict=True, reason="red: skill sits in .claude/, not the canonical dir"
+)
 def test_guard_render_produces_exactly_the_guard_files(tmp_path: Path) -> None:
     dst_path = _render_guard(tmp_path)
     rendered = {
@@ -114,6 +118,24 @@ def test_store_docs_are_vendored_and_preferences_seeded(
         vcs_ref="HEAD",
     )
     assert preferences.read_text() == "# Active Preference Set\n\n- my rule\n"
+
+
+@pytest.mark.xfail(
+    strict=True, reason="red: no .claude/skills bridge in the guard render"
+)
+def test_guard_render_bridges_claude_skills_to_the_canonical_dir(
+    tmp_path: Path,
+) -> None:
+    """Skills live in `.agents/skills/`; `.claude/` links to them.
+
+    Same bridge the main template renders, so an agent discovers the
+    store's skills the way it discovers any other repo's.
+    """
+    dst_path = _render_guard(tmp_path)
+    bridge = dst_path / ".claude" / "skills"
+    assert bridge.is_symlink(), ".claude/skills must stay a symlink, not a copy"
+    assert bridge.readlink().as_posix() == "../.agents/skills"
+    assert (bridge / "compact-preferences" / "SKILL.md").is_file()
 
 
 def test_store_config_survives_a_re_render(tmp_path: Path) -> None:
