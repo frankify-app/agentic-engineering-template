@@ -62,6 +62,17 @@ agentic_disambiguate_roots:
   default: ""
   when: "{{ agentic_subtemplate == 'template' }}"
 
+agentic_trusted_skill_sources:
+  type: str
+  help: >-
+    Comma-separated skill sources (owner/repo) allowed to AUTO-UPDATE into
+    this repo. Vendored skills are executable instructions with full agent
+    permissions, so list a source only when every change to it already
+    passes a review gate you control. Everything else is quarantined by
+    scripts/update-skills.py for human review.
+  default: "frankify-app/skills"
+  when: "{{ agentic_subtemplate == 'template' }}"
+
 agentic_precommit:
   type: str
   help: "Install cross-cutting prek hooks (commitlint, JSON, Markdown, codespell)?"

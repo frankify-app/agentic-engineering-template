@@ -1,0 +1,9 @@
+# Vendored skills are executable instructions that run with full agent
+# permissions. Branch protection + this file are what make the untrusted
+# lane's human gate mechanical rather than conventional — an agent cannot
+# merge a skill change without a human approval.
+#
+# The trusted lane (see .github/workflows/skills-update.yml) auto-merges on
+# green CI, because those changes were already reviewed upstream.
+.agents/skills/ @{{ agentic_repo_owner }}
+skills-policy.json @{{ agentic_repo_owner }}
