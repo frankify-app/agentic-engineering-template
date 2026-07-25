@@ -46,7 +46,14 @@ GITHUB_ONLY_FILES = frozenset(
     }
 )
 
-EXPECTED_WITH_PREK = COMMON_FILES | GITHUB_ONLY_FILES | {".pre-commit-config.yaml"}
+EXPECTED_WITH_PREK = (
+    COMMON_FILES
+    | GITHUB_ONLY_FILES
+    | {
+        ".pre-commit-config.yaml",
+        "scripts/ensure-prek.sh",
+    }
+)
 EXPECTED_WITHOUT_PREK = COMMON_FILES | GITHUB_ONLY_FILES
 
 

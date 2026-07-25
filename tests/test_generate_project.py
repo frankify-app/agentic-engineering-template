@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 
 import copier
-import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -519,7 +518,6 @@ def test_lint_workflow_without_prek_keeps_marker_check(
     )
 
 
-@pytest.mark.xfail(strict=True)
 def test_prek_bootstrap_rendered_and_wired(
     tmp_path: Path,
     base_answers: dict[str, str],
@@ -543,3 +541,20 @@ def test_prek_bootstrap_rendered_and_wired(
         dst_path / "AGENTS.md",
         expected_strs=["prek run --all-files", "chore(stub):"],
     )
+
+
+def test_precommit_none_omits_prek_bootstrap(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    answers = {**base_answers, "agentic_precommit": "none"}
+    dst_path = _render(tmp_path, answers, "prek-bootstrap-none")
+
+    assert not (dst_path / "scripts" / "ensure-prek.sh").exists()
+    settings = json.loads((dst_path / ".claude" / "settings.json").read_text())
+    commands = [
+        hook["command"]
+        for group in settings["hooks"]["SessionStart"]
+        for hook in group["hooks"]
+    ]
+    assert not any("ensure-prek.sh" in command for command in commands)
