@@ -7,6 +7,7 @@ rather than mocked.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -60,6 +61,15 @@ def parked_store(tmp_path: Path) -> Path:
     )
     (store / "tools").mkdir()
     (store / "tools" / "record.py").write_text(RECORDER.read_text())
+    # The recorder validates against the store's vendored copy, so the
+    # fixture has to be a real store, guard included.
+    guards = store / ".github" / "guards"
+    guards.mkdir(parents=True)
+    (guards / "decision_validator.py").write_text(
+        (
+            PROJECT_ROOT / "guard" / ".github" / "guards" / "decision_validator.py"
+        ).read_text()
+    )
     git(store, "add", "-A")
     git(store, "commit", "--quiet", "-m", "seed store")
     git(store, "push", "--quiet", "-u", "origin", "main")
@@ -93,3 +103,55 @@ def test_open_bases_the_session_on_the_default_branch(
     main_tip = git(parked_store, "rev-parse", "origin/main").strip()
     merge_base = git(parked_store, "merge-base", "HEAD", "origin/main").strip()
     assert merge_base == main_tip
+
+
+DRAFT = {
+    "slug": "push-per-record",
+    "project": "aet",
+    "question": "Does a record reach the remote as it lands?",
+    "context": "session-local facts",
+    "options": [
+        {
+            "slot": 1,
+            "label": "yes",
+            "role": "prediction+recommendation",
+            "rules_cited": [],
+            "reasoning": "durability",
+        },
+        {"slot": 2, "label": "no", "if_clause": "if pushes are costly"},
+    ],
+    "prediction_stream": "cold",
+    "artifact_ref": None,
+    "chosen_slot": 1,
+    "chosen": "yes",
+    "correction": False,
+    "rejections": [],
+    "outcome": "hit",
+}
+
+
+@pytest.mark.xfail(strict=True, reason="red: records only reach origin at submit")
+def test_each_record_reaches_the_remote_as_it_lands(
+    parked_store: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The clone holds nothing the remote does not.
+
+    Sessions run in ephemeral clones, so a record that exists only
+    locally is a record one lost container away from gone.
+    """
+    origin_url = git(parked_store, "config", "--get", "remote.origin.url").strip()
+    monkeypatch.setenv("DECISION_MEMORY_URL", origin_url)
+    recorder = load_module("pushing_recorder", parked_store / "tools" / "record.py")
+    recorder.main(["open"])
+    branch = git(parked_store, "rev-parse", "--abbrev-ref", "HEAD").strip()
+
+    drafts = tmp_path / "drafts.json"
+    drafts.write_text(json.dumps([DRAFT]))
+    recorder.main(["record", "--from", str(drafts)])
+
+    local = git(parked_store, "rev-parse", "HEAD").strip()
+    advertised = git(parked_store, "ls-remote", "origin", branch).strip()
+    assert advertised, (
+        f"{branch} is absent from origin — the record never left the clone"
+    )
+    assert advertised.split()[0] == local
