@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import copier
-import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -49,7 +48,6 @@ def _render_guard(tmp_path: Path) -> Path:
     return dst_path
 
 
-@pytest.mark.xfail(strict=True, reason="red: recorder not yet moved into guard/")
 def test_guard_render_produces_exactly_the_guard_files(tmp_path: Path) -> None:
     dst_path = _render_guard(tmp_path)
     rendered = {
@@ -116,7 +114,6 @@ def test_default_render_contains_no_guard_files(
     assert not (dst_path / ".github" / "workflows" / "guards.yml").exists()
 
 
-@pytest.mark.xfail(strict=True, reason="red: recorder not yet moved out of template/")
 def test_default_render_contains_no_recorder(
     render_project,
 ) -> None:

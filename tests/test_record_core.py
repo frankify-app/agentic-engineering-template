@@ -19,9 +19,7 @@ from tests.conftest import load_module
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
-record_tool = load_module(
-    "record_tool", PROJECT_ROOT / "template" / "tools" / "record.py"
-)
+record_tool = load_module("record_tool", PROJECT_ROOT / "guard" / "tools" / "record.py")
 dv = load_module(
     "decision_validator",
     PROJECT_ROOT / "guard" / ".github" / "guards" / "decision_validator.py",

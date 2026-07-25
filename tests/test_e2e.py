@@ -42,7 +42,6 @@ COMMON_FILES = frozenset(
         "docs/glossary/template.md",
         "scripts/enable-agent-shims.sh",
         "skills-lock.json",
-        "tools/record.py",
     }
 )
 
