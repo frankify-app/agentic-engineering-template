@@ -9,11 +9,10 @@ backfilled decision records). The contract this tool must satisfy
 decision-memory repo's docs/conventions.md and CI guards.
 
 Verbs:
-  open     make the store repo available — clone it into an ephemeral
-           temp dir, or reuse an already-attached checkout
-           (--use <path>, matched against DECISION_MEMORY_URL by
-           owner/repo) where cloning is impossible (e.g. managed
-           environments); capture the preference-set SHA, create the
+  open     start a recording session in this store checkout — verify
+           it is the store (origin matched against DECISION_MEMORY_URL
+           by owner/repo tail, since managed environments rewrite
+           remotes), capture the preference-set SHA, create the
            session branch, run the stateless closed-unmerged-PR sweep
   record   mint + validate + write one decision record per input
            draft (stdin JSON object/array, or --from drafts.json),
@@ -29,8 +28,20 @@ Verbs:
   propose  write a preference-rule proposal file with its commit
 
 Configuration: DECISION_MEMORY_URL (full git URL of the data repo;
-never commit it anywhere public). Verbs after `open` find the clone
-via DECISION_MEMORY_DIR or --dir.
+never commit it anywhere public).
+
+The recorder ships inside the store, so it always operates on the
+checkout it lives in — no --dir, no --use, nothing to point at
+anything. Clone the store, then run its copy:
+
+    git clone "$DECISION_MEMORY_URL" <dir>
+    python <dir>/tools/record.py open
+
+Clone fresh per session rather than reusing an attached checkout: a
+fresh clone is clean and on the default branch, which is what keeps a
+session's PR to that session's own records. Where cloning is
+impossible, run the copy inside whatever store checkout is available
+— same invariant, no special flag.
 
 Stdlib only. The file is split into a pure CONTRACT CORE (the dojo
 lift-target) and an IO SHELL; keep the seam strict.
@@ -47,7 +58,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 # ========================== contract core ==========================
@@ -253,20 +263,19 @@ def store_root() -> Path:
 
     Returns the repository root (this file is at <root>/tools/record.py).
     Raises SystemExit when that root is not a git checkout.
+
+    DECISION: the recorder always operates on its own checkout. It is
+    stamped into stores by the guard subtemplate, so "which checkout?"
+    has exactly one answer, and --use / --dir / DECISION_MEMORY_DIR --
+    three ways of answering it -- collapse into this one invariant.
     """
-    raise NotImplementedError
-
-
-def resolve_repo_dir(args: argparse.Namespace) -> Path:
-    raw = args.dir or os.environ.get("DECISION_MEMORY_DIR")
-    if not raw:
-        raise fail(
-            "no clone found — run `record.py open` first, then pass --dir "
-            "or export DECISION_MEMORY_DIR as it prints"
-        )
-    repo_dir = Path(raw)
+    repo_dir = Path(__file__).resolve().parents[1]
     if not (repo_dir / ".git").exists():
-        raise fail(f"{repo_dir} is not a git clone")
+        raise fail(
+            f"{repo_dir} is not a git checkout — run the copy of record.py "
+            "inside a decision-memory store clone, not a loose copy of the "
+            "file (clone the store first: git clone $DECISION_MEMORY_URL)"
+        )
     return repo_dir
 
 
@@ -374,23 +383,26 @@ def covered_closures(records: dict[str, dict]) -> set[int]:
     }
 
 
-def _attach_checkout(path_arg: str, url: str) -> Path:
-    """Validate an already-available checkout of the store repo."""
-    repo_dir = Path(path_arg).resolve()
-    if not (repo_dir / ".git").exists():
-        raise fail(f"--use {repo_dir}: not a git checkout")
+def check_store_checkout(repo_dir: Path, url: str) -> None:
+    """Confirm this checkout is the store, and is safe to record into.
+
+    Raises SystemExit when origin does not match DECISION_MEMORY_URL or
+    the worktree is dirty.
+    """
     origin = run_git(repo_dir, "config", "--get", "remote.origin.url").strip()
+    # DECISION: matched by owner/repo tail, not textually — managed
+    # environments rewrite remotes through a local proxy, so a
+    # proxy-rewritten origin never equals the configured URL.
     if repo_url_tail(origin) != repo_url_tail(url):
         raise fail(
-            f"--use {repo_dir}: origin {origin!r} is not the store repo "
+            f"{repo_dir}: origin {origin!r} is not the store repo "
             f"(DECISION_MEMORY_URL points at {repo_url_tail(url)!r})"
         )
     if run_git(repo_dir, "status", "--porcelain").strip():
         raise fail(
-            f"--use {repo_dir}: worktree is dirty — commit or stash "
-            "before opening a recording session in it"
+            f"{repo_dir}: worktree is dirty — commit or stash before "
+            "opening a recording session in it"
         )
-    return repo_dir
 
 
 def cmd_open(args: argparse.Namespace) -> int:
@@ -401,23 +413,8 @@ def cmd_open(args: argparse.Namespace) -> int:
             "your decision-memory repo (never commit it anywhere public)"
         )
     now = dt.datetime.now(dt.timezone.utc)
-    if args.use:
-        repo_dir = _attach_checkout(args.use, url)
-        print(f"Reusing attached checkout: {repo_dir}")
-    else:
-        repo_dir = Path(tempfile.mkdtemp(prefix="decision-memory-"))
-        result = subprocess.run(
-            ["git", "clone", "--depth", "1", url, str(repo_dir)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise fail(
-                f"clone failed:\n{result.stderr}\n"
-                "If the store repo is already available in this session "
-                "(e.g. attached in a managed environment where outbound "
-                "cloning is blocked), re-run: open --use <path-to-checkout>"
-            )
+    repo_dir = store_root()
+    check_store_checkout(repo_dir, url)
 
     base_commit = run_git(repo_dir, "rev-parse", "HEAD").strip()
     branch = "session/" + now.strftime("%Y%m%dT%H%M%SZ")
@@ -471,7 +468,6 @@ def cmd_open(args: argparse.Namespace) -> int:
         "Reminder: inject preferences.md (and ONLY preferences.md) into "
         "the session context now, if not already injected."
     )
-    print(f"export DECISION_MEMORY_DIR={repo_dir}")
     return 0
 
 
@@ -495,7 +491,7 @@ def commit_record(repo_dir: Path, record: dict) -> None:
 
 
 def cmd_record(args: argparse.Namespace) -> int:
-    repo_dir = resolve_repo_dir(args)
+    repo_dir = store_root()
     state = load_state(repo_dir)
     validator = load_validator(repo_dir)
     now = dt.datetime.now(dt.timezone.utc)
@@ -537,7 +533,7 @@ def cmd_record(args: argparse.Namespace) -> int:
 
 
 def cmd_check(args: argparse.Namespace) -> int:
-    repo_dir = resolve_repo_dir(args)
+    repo_dir = store_root()
     validator = load_validator(repo_dir)
 
     errors: list[str] = []
@@ -691,7 +687,7 @@ def build_pr_body(records: list[dict], streams: dict[str, dict[str, int]]) -> st
 
 
 def cmd_submit(args: argparse.Namespace) -> int:
-    repo_dir = resolve_repo_dir(args)
+    repo_dir = store_root()
     state = load_state(repo_dir)
     validator = load_validator(repo_dir)
     branch = state["branch"]
@@ -792,7 +788,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
 
 
 def cmd_propose(args: argparse.Namespace) -> int:
-    repo_dir = resolve_repo_dir(args)
+    repo_dir = store_root()
     today = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
     rule = " ".join(args.rule.split())
     slug = args.slug or re.sub(
@@ -824,22 +820,12 @@ def main(argv: list[str] | None = None) -> int:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
-        "--dir",
-        help="path to the session clone (default: $DECISION_MEMORY_DIR)",
-    )
     sub = parser.add_subparsers(dest="verb", required=True)
 
     p_open = sub.add_parser("open", help="start a recording session")
     p_open.add_argument(
         "--session",
         help="opaque session grouping key (default: $CLAUDE_SESSION_ID)",
-    )
-    p_open.add_argument(
-        "--use",
-        help="reuse an already-available checkout of the store repo "
-        "instead of cloning (validated against DECISION_MEMORY_URL by "
-        "owner/repo; worktree must be clean)",
     )
     p_open.set_defaults(func=cmd_open)
 

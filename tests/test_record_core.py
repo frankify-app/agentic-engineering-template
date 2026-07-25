@@ -228,7 +228,6 @@ def test_resolve_batch_refs_rejects_unknown_drill_down_slug() -> None:
         record_tool.resolve_batch_refs([d], NOW)
 
 
-@pytest.mark.xfail(strict=True, reason="red: the recorder does not self-locate yet")
 def test_recorder_operates_on_the_checkout_it_lives_in(tmp_path: Path) -> None:
     """The store checkout is the tool's own home.
 
