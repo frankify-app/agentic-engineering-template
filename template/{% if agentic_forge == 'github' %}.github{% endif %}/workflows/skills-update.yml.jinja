@@ -1,0 +1,92 @@
+name: Skills update
+
+# Vendored skills are executable instructions with full agent permissions,
+# so updates arrive in two lanes: changes from a trusted source (already
+# human-reviewed upstream) may auto-merge on green CI; everything else is
+# quarantined by scripts/update-skills.py and needs a human.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: skills-update
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6
+        with:
+          node-version: "22"
+
+      # Exit 1 means untrusted drift was reverted and reported; that is a
+      # normal outcome here, not a workflow failure.
+      - name: Run guarded skills update
+        id: update
+        run: |
+          set +e
+          python3 scripts/update-skills.py
+          echo "status=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Detect changes
+        id: changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "dirty=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dirty=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Trusted lane: the content was reviewed upstream, so a second
+      # approval adds latency without information. Auto-merge on green
+      # keeps a CI record and a revert point (a direct push would not).
+      - name: Open auto-merging PR for trusted updates
+        if: steps.changes.outputs.dirty == 'true' && steps.update.outputs.status == '0'
+        env:
+          GH_TOKEN: {% raw %}${{ github.token }}{% endraw %}
+        run: |
+          set -euo pipefail
+          branch="skills/auto-$(date -u +%Y%m%dT%H%M%SZ)"
+          git switch -c "$branch"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(skills): update from trusted sources"
+          git push -u origin "$branch"
+          gh pr create --fill --label skills-auto \
+            --title "chore(skills): update from trusted sources" \
+            --body "Automated update from sources listed in \`skills-policy.json\`. Every change here was already reviewed upstream in its own repo, so this lane auto-merges on green CI."
+          gh pr merge --auto --squash
+
+      # Untrusted lane: never auto-merged. CODEOWNERS on .agents/skills/
+      # plus branch protection make the human gate mechanical.
+      - name: Open review PR for quarantined updates
+        if: steps.changes.outputs.dirty == 'true' && steps.update.outputs.status == '1'
+        env:
+          GH_TOKEN: {% raw %}${{ github.token }}{% endraw %}
+        run: |
+          set -euo pipefail
+          branch="skills/review-$(date -u +%Y%m%dT%H%M%SZ)"
+          git switch -c "$branch"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(skills): quarantined updates awaiting review"
+          git push -u origin "$branch"
+          gh pr create --label needs-human-review \
+            --title "Skills awaiting review (untrusted sources)" \
+            --body-file skills-review.md
+
+      - name: Fail on installer error
+        if: steps.update.outputs.status == '2'
+        run: |
+          echo "::error::skills installer failed — see the update step log"
+          exit 1

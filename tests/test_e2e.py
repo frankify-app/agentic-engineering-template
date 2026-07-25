@@ -31,6 +31,8 @@ COMMON_FILES = frozenset(
         "scripts/agent-shims/gh",
         "scripts/agent-shims/tea",
         "scripts/doctor.sh",
+        "scripts/update-skills.py",
+        "skills-policy.json",
         "scripts/enable-agent-shims.sh",
         "skills-lock.json",
         "tools/record.py",
@@ -43,6 +45,10 @@ GITHUB_ONLY_FILES = frozenset(
     {
         ".github/workflows/template-update.yml",
         ".github/workflows/lint.yml",
+        # Skills source-trust policy (#58): the update lanes and the
+        # CODEOWNERS gate that makes the untrusted lane mechanical.
+        ".github/workflows/skills-update.yml",
+        ".github/CODEOWNERS",
     }
 )
 
