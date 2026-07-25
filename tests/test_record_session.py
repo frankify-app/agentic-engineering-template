@@ -130,7 +130,6 @@ DRAFT = {
 }
 
 
-@pytest.mark.xfail(strict=True, reason="red: records only reach origin at submit")
 def test_each_record_reaches_the_remote_as_it_lands(
     parked_store: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

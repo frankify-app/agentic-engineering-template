@@ -16,9 +16,10 @@ Verbs:
            session branch, run the stateless closed-unmerged-PR sweep
   record   mint + validate + write one decision record per input
            draft (stdin JSON object/array, or --from drafts.json),
-           one commit per record; batch-local slug references
-           (supersedes_slug, drill_down_of_slug, related_slugs)
-           resolve to the minted IDs
+           one commit per record, each pushed as it lands so the
+           clone holds nothing the remote does not; batch-local slug
+           references (supersedes_slug, drill_down_of_slug,
+           related_slugs) resolve to the minted IDs
   check    validate the entire decisions/ corpus + dangling refs +
            preferences.md token budget
   submit   compute two-stream hit rates (refined and near-tie
@@ -530,8 +531,34 @@ def commit_record(repo_dir: Path, record: dict) -> None:
     # (§ Commit types); the vendored guard lints what this composes.
     subject = f"decision({record['project']}): {slug} — {chosen}"
     run_git(repo_dir, "add", str(path))
-    run_git(repo_dir, "commit", "-m", subject)
+    run_git(repo_dir, "commit", "--quiet", "-m", subject)
+    push_session(repo_dir)
     print(f"Recorded {record_id} ({subject})")
+
+
+def push_session(repo_dir: Path) -> None:
+    """Publish the session branch as it stands.
+
+    DECISION: every record is pushed the moment it is committed, so the
+    clone holds nothing the remote does not. Sessions run in ephemeral
+    clones — that is what makes the clone disposable and its location
+    irrelevant, instead of a durability question.
+
+    Raises SystemExit when the push fails: a silently unpushed record
+    is exactly the loss this is here to prevent.
+    """
+    branch = run_git(repo_dir, "rev-parse", "--abbrev-ref", "HEAD").strip()
+    result = subprocess.run(
+        ["git", "-C", str(repo_dir), "push", "--quiet", "-u", "origin", branch],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise fail(
+            f"pushing {branch} to origin failed:\n{result.stderr}\n"
+            "The record is committed locally but not published — retry, or "
+            "push manually before this clone goes away."
+        )
 
 
 def cmd_record(args: argparse.Namespace) -> int:
@@ -784,7 +811,9 @@ def cmd_submit(args: argparse.Namespace) -> int:
             run_git(repo_dir, "commit", "-m", f"pref-confirm: {rule} (n={count})")
             print(f"pref-confirm: {rule} (n={count})")
 
-    run_git(repo_dir, "push", "-u", "origin", branch)
+    # Records were pushed as they landed; this catches the counter
+    # bumps above and is a no-op when there were none.
+    push_session(repo_dir)
     print(f"Pushed {branch}.")
 
     title = f"decision session {branch.split('/', 1)[1]} — " + (
