@@ -151,6 +151,27 @@ Questions asked at generation time (all prefixed `agentic_`):
 
 Post-render tasks call doctor in check mode only — never auto-install.
 
+## Glossary
+
+Terms this template defines. The shared set under
+[`template/docs/glossary/`](template/docs/glossary/) is stamped into every
+generated repo; the copies below are this repo's own stamped output, which is
+what makes them lintable here.
+
+- [agentic-engineering-template](docs/glossary/agentic-engineering-template.md)
+- [decision-memory](docs/glossary/decision-memory.md)
+- [decision record](docs/glossary/decision-record.md)
+- [grilling](docs/glossary/grilling.md)
+- [preference set](docs/glossary/preference-set.md)
+- [record contract](docs/glossary/record-contract.md)
+- [session](docs/glossary/session.md)
+- [stamp](docs/glossary/stamp.md)
+- [template](docs/glossary/template.md)
+
+These links live in this repo's own README, which is NOT part of the render —
+so in a generated repo the same terms arrive unlinked, stay orphaned until
+something references them, and can be removed with `disambiguate prune`.
+
 ## Developing this template
 
 ```shell
