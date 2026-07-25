@@ -31,9 +31,8 @@ Verbs:
 Configuration: DECISION_MEMORY_URL (full git URL of the data repo;
 never commit it anywhere public).
 
-The recorder ships inside the store, so it always operates on the
-checkout it lives in — no --dir, no --use, nothing to point at
-anything. Clone the store, then run its copy:
+The recorder ships inside the store and always operates on the
+checkout it lives in. Clone the store, then run its copy:
 
     git clone "$DECISION_MEMORY_URL" <dir>
     python <dir>/tools/record.py open
@@ -267,8 +266,8 @@ def store_root() -> Path:
 
     DECISION: the recorder always operates on its own checkout. It is
     stamped into stores by the guard subtemplate, so "which checkout?"
-    has exactly one answer, and --use / --dir / DECISION_MEMORY_DIR --
-    three ways of answering it -- collapse into this one invariant.
+    has exactly one answer and needs no flag, env var or search to
+    resolve.
     """
     repo_dir = Path(__file__).resolve().parents[1]
     if not (repo_dir / ".git").exists():

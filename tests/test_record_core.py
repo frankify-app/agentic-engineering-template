@@ -232,8 +232,7 @@ def test_recorder_operates_on_the_checkout_it_lives_in(tmp_path: Path) -> None:
     """The store checkout is the tool's own home.
 
     The recorder ships inside a store, so `which checkout?` has exactly
-    one answer: the one this file sits in. That invariant replaces
-    --use, --dir and DECISION_MEMORY_DIR.
+    one answer: the one this file sits in.
     """
     store = tmp_path / "decision-memory"
     (store / "tools").mkdir(parents=True)

@@ -61,13 +61,28 @@ protecting the data's integrity.
 
 ## Writing to this repo
 
-The contract lives in [docs/conventions.md](docs/conventions.md). The
-writer tool (`record.py`) lives with its consumers in the
-agentic-engineering-template repo; its `--help` (the module
-docstring) is the authoritative behavior doc, and design history
-lives in that repo's issue #37. This repo stays ignorant of which
-tools write to it. Hand-written records are allowed — they get no
-help and face the same guards.
+The contract lives in [docs/conventions.md](docs/conventions.md).
+The writer tool ships here, in `tools/record.py`, vendored from the
+agentic-engineering-template guard subtemplate;
+its `--help` (the module docstring) is the authoritative behavior doc,
+and design history lives in that repo's issue #37.
+
+The recorder operates on the checkout it lives in,
+so a session clones this repo and runs the copy that arrives with it:
+
+```bash
+git clone "$DECISION_MEMORY_URL" <dir>
+python <dir>/tools/record.py open
+```
+
+Clone fresh per session.
+A fresh clone is clean and on the default branch,
+which is what keeps a session's PR to that session's own records;
+a reused checkout parked on an earlier session's branch does not.
+Each record is pushed as it lands, so the clone is disposable.
+
+Hand-written records are allowed — they get no help and face the same
+guards.
 
 To extract decisions from a past conversation (no repo access needed
 there), use
