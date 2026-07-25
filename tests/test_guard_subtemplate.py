@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import copier
-import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -117,7 +116,6 @@ def test_store_docs_are_vendored_and_preferences_seeded(
     assert preferences.read_text() == "# Active Preference Set\n\n- my rule\n"
 
 
-@pytest.mark.xfail(strict=True, reason="red: store.config.json is not store-owned yet")
 def test_store_config_survives_a_re_render(tmp_path: Path) -> None:
     """The knobs are the store's to tune, so `copier update` must never
     revert a human's budget back to the template's seed."""
