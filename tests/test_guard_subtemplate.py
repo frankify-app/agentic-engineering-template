@@ -11,14 +11,24 @@ from __future__ import annotations
 from pathlib import Path
 
 import copier
+import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
 GUARD_FILES = frozenset(
     {
+        ".claude/skills/compact-preferences/SKILL.md",
         ".copier-answers.agentic.yml",
         ".github/guards/decision_validator.py",
         ".github/guards/guards.py",
+        ".github/store/README.md",
+        ".github/store/budget.py",
+        ".github/store/config.py",
+        ".github/store/preferences_guard.py",
+        ".github/store/replay.py",
+        ".github/store/tests/test_store.py",
+        ".github/workflows/preferences-budget.yml",
+        ".github/workflows/preferences-guard.yml",
         ".github/workflows/guards.yml",
         ".gitignore",
         "AGENTS.md",
@@ -27,6 +37,7 @@ GUARD_FILES = frozenset(
         "docs/conventions.md",
         "docs/extraction-prompt.md",
         "preferences.md",
+        "store.config.json",
         "tools/record.py",
     }
 )
@@ -48,6 +59,7 @@ def _render_guard(tmp_path: Path) -> Path:
     return dst_path
 
 
+@pytest.mark.xfail(strict=True, reason="red: store layer not yet vendored into guard/")
 def test_guard_render_produces_exactly_the_guard_files(tmp_path: Path) -> None:
     dst_path = _render_guard(tmp_path)
     rendered = {
