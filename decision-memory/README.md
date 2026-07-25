@@ -63,7 +63,7 @@ protecting the data's integrity.
 
 The contract lives in [docs/conventions.md](docs/conventions.md).
 The writer tool ships here, in `tools/record.py`, vendored from the
-agentic-engineering-template guard subtemplate;
+agentic-engineering-template decision-memory subtemplate;
 its `--help` (the module docstring) is the authoritative behavior doc,
 and design history lives in that repo's issue #37.
 
@@ -91,7 +91,7 @@ there), use
 ## Guards
 
 `.github/guards/` — like this file and everything under `docs/` — is
-copier-vendored from the template repo's store subtemplate; the guard
+copier-vendored from the template repo's decision-memory subtemplate; the guard
 uses the same validator the writer tool imports, so writer and CI
 validation cannot drift. Update via `copier update` (the diff is
 reviewed here like any PR — the human gate on guard changes).

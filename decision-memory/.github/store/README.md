@@ -51,7 +51,7 @@ are tolerated (`_comment` is one), invalid values fail loudly.
 `budget_tokens` cannot exceed the vendored
 `decision_validator.PREFERENCES_TOKEN_BUDGET`: the vendored guard
 would fail the PR first, so a higher local value would be a lie.
-Raising it means raising it in the template's guard subtemplate and
+Raising it means raising it in the template's decision-memory subtemplate and
 pulling that through `copier update`.
 
 Token counting is not reimplemented here — `estimate_tokens` from the

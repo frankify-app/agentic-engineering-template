@@ -1,6 +1,6 @@
 """CI guard for the decision-memory repo.
 
-Copier-vendored from the agentic-engineering-template guard subtemplate
+Copier-vendored from the agentic-engineering-template decision-memory subtemplate
 (single shared source with the writer tool's validation — both import
 decision_validator.py, which lives next to this file). Stdlib only:
 the guard must keep working even if the template repo disappears.

@@ -13,7 +13,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
 STORE_SELF_TEST = (
-    PROJECT_ROOT / "guard" / ".github" / "store" / "tests" / "test_store.py"
+    PROJECT_ROOT / "decision-memory" / ".github" / "store" / "tests" / "test_store.py"
 )
 
 

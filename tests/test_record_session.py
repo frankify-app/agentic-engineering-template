@@ -16,7 +16,7 @@ import pytest
 from tests.conftest import load_module
 
 PROJECT_ROOT = Path(__file__).parent.parent
-RECORDER = PROJECT_ROOT / "guard" / "tools" / "record.py"
+RECORDER = PROJECT_ROOT / "decision-memory" / "tools" / "record.py"
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -57,7 +57,7 @@ def parked_store(tmp_path: Path) -> Path:
     # The store's own .gitignore, so importing the recorder in-process
     # does not make the worktree look dirty.
     (store / ".gitignore").write_text(
-        (PROJECT_ROOT / "guard" / ".gitignore").read_text()
+        (PROJECT_ROOT / "decision-memory" / ".gitignore").read_text()
     )
     (store / "tools").mkdir()
     (store / "tools" / "record.py").write_text(RECORDER.read_text())
@@ -67,7 +67,11 @@ def parked_store(tmp_path: Path) -> Path:
     guards.mkdir(parents=True)
     (guards / "decision_validator.py").write_text(
         (
-            PROJECT_ROOT / "guard" / ".github" / "guards" / "decision_validator.py"
+            PROJECT_ROOT
+            / "decision-memory"
+            / ".github"
+            / "guards"
+            / "decision_validator.py"
         ).read_text()
     )
     git(store, "add", "-A")

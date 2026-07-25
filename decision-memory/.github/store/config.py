@@ -73,7 +73,7 @@ def validate_config(config: dict) -> list[str]:
         errors.append(
             f"budget_tokens: {budget} exceeds the vendored backstop {backstop} "
             "— the vendored guard would fail the PR first. Raise "
-            "PREFERENCES_TOKEN_BUDGET in the template's guard subtemplate and "
+            "PREFERENCES_TOKEN_BUDGET in the template's decision-memory subtemplate and "
             "`copier update` before raising it here"
         )
     return errors

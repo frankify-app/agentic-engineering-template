@@ -265,7 +265,7 @@ def store_root() -> Path:
     Raises SystemExit when that root is not a git checkout.
 
     DECISION: the recorder always operates on its own checkout. It is
-    stamped into stores by the guard subtemplate, so "which checkout?"
+    stamped into stores by the decision-memory subtemplate, so "which checkout?"
     has exactly one answer and needs no flag, env var or search to
     resolve.
     """
@@ -294,8 +294,8 @@ def load_validator(repo_dir: Path):
     if not path.exists():
         raise fail(
             f"vendored validator missing at {path} — the data repo must "
-            "vendor the guard subtemplate (copier update from the "
-            "agentic-engineering-template guard subtemplate)"
+            "vendor the decision-memory subtemplate (copier update from the "
+            "agentic-engineering-template decision-memory subtemplate)"
         )
     spec = importlib.util.spec_from_file_location("decision_validator", path)
     if spec is None or spec.loader is None:
