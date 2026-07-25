@@ -216,8 +216,8 @@ The modes below are the kinds of work the user will ask for. **Each runs in its 
 - Implement the minimal code to pass tests, then the remaining code per the ticket spec. Place `DECISION:` markers per the `documenting-decisions` skill (refs: `decision-markers.md`, `marker-examples.md`).
 - Commit discipline:
   - One test → one commit → one implementation for that test → one commit
-  - `prek` must pass on every commit (lint/format hooks only — prek never runs unit tests).
-  - TDD red-step commits are expected and required (a commit whose new tests fail but whose lint/format passes). **CI evaluates at PR HEAD, not per-commit**, so a red-step commit does not constitute a CI failure — do not treat it as one.
+  - `prek` must pass on every commit (lint/format hooks only — prek never runs unit tests). Enforce it, don't assume it: after **every** commit run `prek run --all-files` and require exit 0 with a clean tree — an auto-fixer modifying files counts as failure; amend the fix into the commit that introduced it (per the `tdd` skill's commit protocol). The SessionStart hook (`scripts/ensure-prek.sh`) installs the git hook so dirty commits are blocked even in fresh clones; a missing prek is a `scripts/doctor.sh --install` failure, not a license to skip.
+  - TDD red-step commits are expected and required — red on **tests only**: lint, format, and type checks still pass. A test needing a not-yet-existing API surface gets a signature-only `chore(stub):` commit first (see the `tdd` skill). **CI evaluates at PR HEAD, not per-commit**, so a red-step commit does not constitute a CI failure — do not treat it as one.
   - Don't fix lint manually — run the formatter. Only touch code directly if the tools can't resolve it.
 - Push → `git push` *(plain git; git is not routed through `ghx`)*
 - Create the PR if not already present, and link it to the issue both ways → `ghx pr create` (start with `Closes #<number>` in description), then `ghx issue edit` if a back-reference is needed. **If a PR already exists for this branch, do not create or re-link it** — skip to CI.
@@ -255,6 +255,10 @@ Add packages using the package manager only, never edit requirements/dependencie
 - Document all params, return shapes, and every possible error response
 - Test cases must cover edge cases for inputs and every @returns line in the contract
 - Non-trivial decisions or behavior should be documented via inline comments
+
+## Failures Become Rules
+
+When something fails that automation or an instruction could have prevented — a lint run nobody made, a tool nobody installed, a convention discovered only in review — the fix is incomplete until the prevention is encoded: a hook, a doctor check, or a rule in the template repo's AGENTS.md/skills (preferred, so every generated repo inherits it); [docs/conventions.md](docs/conventions.md) only when it is genuinely repo-local. File the ticket on the owning repo in the same session the failure surfaced. Fixing only the instance guarantees a repeat.
 
 ## Project Conventions
 
