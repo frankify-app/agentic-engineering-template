@@ -192,7 +192,6 @@ def test_e2e_copy_non_english_omits_codespell(
 SMOKE_REQUIRED_TOOLS = ("git", "npx", "uvx", "prek")
 
 
-@pytest.mark.xfail(strict=True, reason="red: the doctor task can abort a render")
 def test_reporting_tasks_cannot_roll_back_a_render() -> None:
     """A task that reports rather than gates must not abort the run.
 

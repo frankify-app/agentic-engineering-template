@@ -150,7 +150,12 @@ _jinja_extensions:
 # and must not install skills, run doctor, or register hooks there.
 _tasks:
   - "{% if agentic_subtemplate == 'template' %}npx skills@latest experimental_install{% else %}true{% endif %}"
-  - "{% if agentic_subtemplate == 'template' %}bash scripts/doctor.sh{% else %}true{% endif %}"
+  # Advisory, never a gate: copier rolls the whole render back on a non-zero
+  # task, so a missing host tool would lose the stamp over a report. Doctor's
+  # own exit code is untouched — a direct run still fails hard.
+  - >-
+    {% if agentic_subtemplate == 'template' %}bash scripts/doctor.sh
+    || true{% else %}true{% endif %}
   # Register prek git hooks so commits actually run them. A config file alone
   # does nothing — `prek install` must write .git/hooks. Guard on a git work
   # tree (copier may render into a plain dir) and on prek being selected.
