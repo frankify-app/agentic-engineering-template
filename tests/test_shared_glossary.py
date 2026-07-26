@@ -147,7 +147,6 @@ def test_shared_terms_are_repo_neutral() -> None:
 PRUNE_REQUIRED_TOOLS = ("git", "npx", "uvx", "prek")
 
 
-@pytest.mark.xfail(strict=True, reason="red: no post-stamp prune task yet")
 def test_a_stamped_repo_keeps_only_the_shared_terms_it_links(
     tmp_path: Path,
     base_answers: dict[str, str],

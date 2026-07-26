@@ -49,8 +49,8 @@ agentic_language:
 
 agentic_disambiguate_version:
   type: str
-  help: "Pinned disambiguate version (pre-alpha — breaking changes between releases; hook and docs commands use this pin)."
-  default: "0.2.0"
+  help: "Pinned disambiguate version (pre-alpha — breaking changes between releases; hook, docs commands and the post-stamp prune use this pin)."
+  default: "0.3.0"
   when: "{{ agentic_subtemplate == 'template' }}"
 
 agentic_disambiguate_roots:
@@ -162,3 +162,10 @@ _tasks:
   - >-
     {% if agentic_subtemplate == 'template' and agentic_precommit == 'prek' %}git rev-parse --is-inside-work-tree
     >/dev/null 2>&1 && prek install || true{% else %}true{% endif %}
+  # Converge the glossary: a repo receives every shared term and keeps only the
+  # ones it links, so the orphan check needs no exemption and no repo curates
+  # the set by hand. Advisory for the same reason as the report above — an
+  # unconverged glossary is a lint finding, not a reason to lose the stamp.
+  - >-
+    {% if agentic_subtemplate == 'template' %}uvx disambiguate=={{ agentic_disambiguate_version }} prune
+    || true{% else %}true{% endif %}
