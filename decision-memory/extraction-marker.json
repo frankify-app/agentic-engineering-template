@@ -1,0 +1,4 @@
+{
+  "_comment": "Store-owned. The last decision record covered by an extraction pass; everything with a later ID is the next batch. Advanced by the final commit of an extraction PR, never by hand. See .github/store/README.md.",
+  "last_extracted_record_id": null
+}
