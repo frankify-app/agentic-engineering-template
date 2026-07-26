@@ -24,13 +24,21 @@ protecting the data's integrity.
 │                           # records from past conversations
 ├── preferences.md          # active preference set — the ONLY file
 │                           # injected into agent context
+├── store.config.json       # store-owned knobs: token budget, labels,
+│                           # replay window, small-n threshold
+├── extraction-marker.json  # store-owned: last record an extraction
+│                           # pass covered
 ├── proposals/              # agent-proposed preference rules awaiting
 │                           # human promotion (merge != promotion)
 ├── decisions/              # full history, append-only, flat —
 │                           # one immutable JSON file per decision
+├── .agents/skills/         # the two manual preference-set skills
+│   ├── extract-preferences/  # records -> candidate rules
+│   └── compact-preferences/  # shrink the set, gated on a replay
 └── .github/
-    ├── workflows/guards.yml  # CI guards
-    └── guards/             # copier-vendored guard scripts
+    ├── workflows/          # record guards, budget report, PR gate
+    ├── guards/             # copier-vendored record guard + validator
+    └── store/              # copier-vendored preference-set lifecycle
 ```
 
 (`proposals/` and `decisions/` materialize with their first files.)
@@ -45,9 +53,10 @@ protecting the data's integrity.
   guards reject any PR that modifies, deletes, or renames existing
   records.
 - **Preferences:** `preferences.md` is the active preference set — the
-  only file injected into agent sessions, kept under a hard ~2k-token
-  budget. Confirmation counters on each rule are the one sanctioned
-  edit.
+  only file injected into agent sessions, kept under a hard token
+  budget (`budget_tokens` in `store.config.json`, default ~2k).
+  Confirmation counters on each rule are the one sanctioned routine
+  edit; everything else goes through the lifecycle below.
 - **Proposals:** agents write candidate rules to `proposals/` (one
   rule per file); only a human `pref-promote` commit moves content
   into `preferences.md`.
@@ -58,6 +67,39 @@ protecting the data's integrity.
   `DECISION_MEMORY_URL` environment variable (full git URL, never
   committed anywhere public) and inject `preferences.md` only — never
   `decisions/` wholesale.
+
+## The preference-set lifecycle
+
+Every rule in `preferences.md` costs context on every grilled session,
+forever. Two manual skills manage that cost, in this order — there is
+nothing to compact until rules exist, and the compaction gate cannot
+measure a rule set no record was ever scored against.
+
+| | What it does | Driven by |
+| --- | --- | --- |
+| **Extract** (`/extract-preferences`) | Reads every record since `extraction-marker.json` and, per pattern, bumps a counter, flags drift, or proposes a rule. Never writes to `decisions/`. | `.github/store/extraction.py` |
+| **Budget** (automatic) | Token-counts `preferences.md` on every push to `main` and keeps one pinned "compression due" issue in sync. Reports, never blocks. | `.github/store/budget.py` |
+| **Compact** (`/compact-preferences`) | Merges overlapping rules, drops dead ones, tightens wording — then replays the last decisions under the old and new sets and gates on the preference-driven hit rate. | `.github/store/replay.py` |
+
+A PR rewriting existing lines in `preferences.md` needs the carve-out
+label and a passing replay report in its description; the PR gate
+(`.github/store/preferences_guard.py`) checks the report was produced
+against the exact file in the PR head. Below `min_gated_cases`
+preference-driven cases the gate returns `insufficient-evidence`
+rather than `pass`, and merging then needs an explicit waiver label —
+so a store with no extracted rules yet gets an honest amber instead of
+a green check that means nothing.
+
+Check the current state at any time:
+
+```bash
+python .github/store/budget.py        # tokens, percent, level
+python .github/store/extraction.py status   # records awaiting extraction
+```
+
+The knobs are `store.config.json` — store-owned, seeded once, never
+overwritten by `copier update`. Details in
+[.github/store/README.md](.github/store/README.md).
 
 ## Writing to this repo
 

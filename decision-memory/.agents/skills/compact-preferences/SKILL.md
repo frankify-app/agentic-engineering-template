@@ -16,6 +16,12 @@ cost comes back down without losing what the rules encode.
 Manual trigger only — never on a schedule, never as a side effect of
 another task. A human merges the result.
 
+**Extraction comes first.** If the store has never been extracted into
+(`python .github/store/extraction.py status` shows the whole corpus
+pending, or every record reads `prediction_stream: cold`), there is
+little to compact and nothing to gate against — run
+`extract-preferences` first and come back.
+
 ## Invariants
 
 Break any of these and CI rejects the PR, as it should.
@@ -62,8 +68,9 @@ python .github/store/replay.py cases --out /tmp/cases.json
 
 `cases.json` holds the last ~20 decisions **masked to their input
 side** — question, context, and the options with the recorded
-prediction role, cited rules and in-session reasoning stripped out.
-The window comes from `replay_window` in `store.config.json`.
+prediction role, cited rules and in-session reasoning stripped out,
+presented in a per-record shuffled order so slot position carries no
+signal. The window comes from `replay_window` in `store.config.json`.
 
 ### 4. Predict under the baseline set
 
@@ -137,34 +144,58 @@ python .github/store/replay.py gate \
   --out /tmp/replay-report.json
 ```
 
-`gate` exits non-zero when the **preference-driven** hit rate
-degrades. That stream is the gate. The **cold** stream is the control
-group: it measures plain judgment, which a rule-set edit should barely
-move — a large swing there says the two runs were not comparable, so
-re-run rather than explain it away.
+`gate` reports one of three verdicts, with a distinct exit code each:
+
+- **`pass`** (exit 0) — the **preference-driven** hit rate held, over
+  enough cases to mean it. That stream is the gate. The **cold**
+  stream is the control group: it measures plain judgment, which a
+  rule-set edit should barely move — a large swing there says the two
+  runs were not comparable, so re-run rather than explain it away.
+- **`fail`** (exit 1) — a measured regression, or two runs that are
+  not comparable. Revise the compaction and re-run this step. Never
+  merge a failing gate, and never edit the report to make it pass.
+- **`insufficient-evidence`** (exit 3) — nothing degraded, but fewer
+  than `min_gated_cases` cases were preference-driven, so the pass
+  carries no evidence. This is the expected verdict on a store whose
+  records are all `cold` because no rules have been extracted yet.
 
 Cases shift streams under the compacted set (a merged rule may now
 match a case that was cold, or a dropped rule may leave one cold).
 Each case scores under the stream the candidate set assigns; the
 report counts the shifts so a hit-rate change caused by re-labelling
 rather than by better rules is visible. Read them before trusting a
-pass.
+pass — a candidate whose gated `n` moved a lot under a small edit is
+measuring its own labelling, not its rules.
 
-If the gate fails: revise the compaction and re-run this step. Never
-merge a failing gate, and never edit the report to make it pass.
+Slot numbers in the cases are shuffled per record and mapped back
+during scoring, so a run cannot score by learning that slot 1 is the
+prediction slot. `predicted_slot` in the report is the recorded slot;
+`presented_slot` is what the run answered.
+
+On `insufficient-evidence`, the honest move is usually to extract
+first — run `extract-preferences`, get rules into the set, let
+sessions score against them, and compact once the gated stream can
+carry the claim. When the compaction genuinely cannot wait, add the
+replay-waiver label from `store.config.json`
+(`replay_waiver_label`, default `preferences-replay-waiver`)
+alongside the carve-out label and say in the PR description why a
+human is accepting an unvalidated compaction. CI then passes and the
+waiver is on the record. Do not apply the waiver to a `fail`; it does
+not work there, by design.
 
 ### 7. Commit
 
-One commit, `pref-promote:` type:
+One commit, `pref-compact:` type:
 
 ```text
-pref-promote: compact active set — 7 rules -> 4 (~1.8k -> ~1.1k tokens)
+pref-compact: compact active set — 7 rules -> 4 (~1.8k -> ~1.1k tokens)
 ```
 
-`pref-promote` is the only commit type the vendored guard permits to
-remove lines from `preferences.md`. Promotion stays human-only where
-it matters: a human merges the PR, and compaction adds no rule that
-was not already promoted.
+`pref-compact` exists so the log can tell compaction from promotion:
+both remove lines from `preferences.md`, but promotion adopts a rule a
+human decided on, while compaction adds nothing that was not already
+promoted. The human gate is the merge plus the carve-out label, not
+the commit subject.
 
 ### 8. Open the PR
 
@@ -176,6 +207,9 @@ Draft PR, carrying:
   exist yet: `gh label create preferences-carve-out`. In managed
   environments use the forge tooling the environment declares, not
   `gh`.
+- the replay-waiver label (`replay_waiver_label`, default
+  `preferences-replay-waiver`) ONLY when the gate returned
+  `insufficient-evidence` and step 6's reasoning applies.
 - the replay report, verbatim, in the description:
 
 ````markdown

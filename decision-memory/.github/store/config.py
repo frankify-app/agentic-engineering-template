@@ -8,11 +8,13 @@ fighting the template. The vendored guard next door
 (`.github/guards/`) stays untouched; this layer sits on top of it and
 only ever imports it read-only.
 
-The one place the two meet is the token budget:
-`decision_validator.PREFERENCES_TOKEN_BUDGET` is a vendored hard
-backstop that fails any PR over it, so a repo-local `budget_tokens`
-above that value would be unreachable — configuring one is an error
-with a pointer to the fix (raise it in the template, `copier update`).
+The one place the two meet is the token budget, and there is exactly
+one of it: `decision_validator.PREFERENCES_TOKEN_BUDGET` is the
+DEFAULT `budget_tokens`, not a ceiling over it. The vendored guard
+reads this config and enforces whatever the store chose, so a store
+raising its budget does not have to raise a template constant first.
+The budget is per-principal — one number, adjustable in one obvious
+place, checked once.
 
 Stdlib only, like the vendored guard.
 """
@@ -37,11 +39,20 @@ DEFAULTS: dict[str, object] = {
     "warn_at_percent": 80,
     "carve_out_label": "preferences-carve-out",
     "budget_issue_label": "preferences-budget",
+    "replay_waiver_label": "preferences-replay-waiver",
     "replay_window": 20,
+    # Below this many PREFERENCE-DRIVEN cases the replay gate reports
+    # `insufficient-evidence` instead of `pass`. Measured, not guessed:
+    # on a null test (same rule set, two blind runs) the gated
+    # denominator moved 3 -> 5 purely on whether each run claimed a rule
+    # drove its pick, and at that size one case flipping swings the hit
+    # rate 20-33 points. Eight keeps a single flip inside ~12 points,
+    # which is small enough for a degradation to mean something.
+    "min_gated_cases": 8,
 }
 
-_POSITIVE_INTS = ("budget_tokens", "replay_window")
-_LABELS = ("carve_out_label", "budget_issue_label")
+_POSITIVE_INTS = ("budget_tokens", "replay_window", "min_gated_cases")
+_LABELS = ("carve_out_label", "budget_issue_label", "replay_waiver_label")
 
 
 class ConfigError(Exception):
@@ -66,16 +77,6 @@ def validate_config(config: dict) -> list[str]:
     warn = config.get("warn_at_percent")
     if not isinstance(warn, int) or isinstance(warn, bool) or not 1 <= warn <= 100:
         errors.append(f"warn_at_percent: must be an integer in 1..100, got {warn!r}")
-
-    budget = config.get("budget_tokens")
-    backstop = decision_validator.PREFERENCES_TOKEN_BUDGET
-    if isinstance(budget, int) and not isinstance(budget, bool) and budget > backstop:
-        errors.append(
-            f"budget_tokens: {budget} exceeds the vendored backstop {backstop} "
-            "— the vendored guard would fail the PR first. Raise "
-            "PREFERENCES_TOKEN_BUDGET in the template's decision-memory subtemplate and "
-            "`copier update` before raising it here"
-        )
     return errors
 
 

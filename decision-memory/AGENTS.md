@@ -28,8 +28,13 @@ authoritative contract.
   parked on someone else's branch. Hand-written records are allowed;
   they get no help and face the same guards.
 - `preferences.md` may only change via counter-line bumps
-  (`pref-confirm`) or human promotion (`pref-promote`). Promotion is
-  human-only, always.
+  (`pref-confirm`), human promotion (`pref-promote`), or a gated
+  compaction (`pref-compact`, carve-out label + replay report).
+  Promotion is human-only, always.
+- Growing and shrinking the preference set are two manual skills, run
+  in that order — see [Preference-set lifecycle](#preference-set-lifecycle)
+  below. Neither runs on a schedule or as a side effect of another
+  task.
 - Never write this repo's URL into any public artifact. Consumers
   reference it via the `DECISION_MEMORY_URL` env var only.
 
@@ -41,17 +46,49 @@ authoritative contract.
 - One PR per session; one commit per record.
 - Commit types are this repo's own and are CI-linted — see
   [docs/conventions.md](docs/conventions.md) (`decision(...)`,
-  `pref-proposal`, `pref-promote`, `pref-confirm`, `chore`).
+  `pref-proposal`, `pref-promote`, `pref-confirm`, `pref-compact`,
+  `pref-drift`, `chore`).
 - In managed environments (e.g. Claude Code on the Web), ALWAYS use
   the tooling the environment itself declares for forge operations
   (PR creation etc.) — `gh`/`curl` are typically sabotaged there. The
   recorder's `submit` hands the PR off to you in that case.
 
+## Preference-set lifecycle
+
+`preferences.md` is injected into every grilled session, so every rule
+in it is a permanent per-session context tax. Two manual, human-merged
+skills manage it. **Run them in this order** — there is nothing to
+compact until rules have been extracted, and the compaction gate
+cannot measure a rule set no record was ever scored against.
+
+1. **`/extract-preferences`** — reads every record after
+   `extraction-marker.json` and, per pattern, does exactly one of:
+   bump a counter, flag drift against a rule the records contradict,
+   or propose a new rule. Reads `decisions/`, never writes there. The
+   marker advances in the PR's final commit.
+2. **`/compact-preferences`** — merges, drops and tightens, then
+   replays the last decisions under the old and new sets and gates on
+   the preference-driven hit rate. Needs the carve-out label and a
+   fresh replay report in the PR description.
+
+Status, any time:
+
+```bash
+python .github/store/budget.py              # tokens, percent, level
+python .github/store/extraction.py status   # records awaiting extraction
+```
+
+The budget workflow opens a pinned "compression due" issue on its own
+when the file approaches its budget — that issue, not a schedule, is
+the trigger for compaction. Knobs live in `store.config.json`
+(store-owned, never clobbered by `copier update`); the flow is
+documented in [.github/store/README.md](.github/store/README.md).
+
 ## Pointers
 
 - [docs/conventions.md](docs/conventions.md) — the authoritative
   writing contract: record schema, field conventions, commit types,
-  PR flow.
+  PR flow, preference-set lifecycle.
 - [docs/extraction-prompt.md](docs/extraction-prompt.md) — paste into
   any chat to extract draft records from a past conversation.
 - `.github/guards/`, the docs, and this file are vendored from the

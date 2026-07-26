@@ -19,10 +19,14 @@ import tempfile
 import unittest
 
 STORE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+GUARDS_DIR = os.path.join(os.path.dirname(STORE_DIR), "guards")
 sys.path.insert(0, STORE_DIR)
+sys.path.insert(0, GUARDS_DIR)
 
 import budget as store_budget  # noqa: E402
 import config as store_config  # noqa: E402
+import extraction  # noqa: E402
+import guards  # noqa: E402
 import preferences_guard as guard  # noqa: E402
 import replay  # noqa: E402
 
@@ -73,18 +77,28 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(store_config.load_config(tmp), dict(store_config.DEFAULTS))
 
-    def test_budget_above_vendored_backstop_is_rejected(self):
+    def test_budget_above_the_vendored_default_is_allowed(self):
+        """The vendored constant is the DEFAULT, never a ceiling.
+
+        One budget, one authority: the record guard reads this config,
+        so a store raising its budget does not have to raise a template
+        constant first.
+        """
         config = dict(store_config.DEFAULTS)
-        config["budget_tokens"] = config["budget_tokens"] + 1
-        errors = store_config.validate_config(config)
-        self.assertTrue(any("vendored backstop" in e for e in errors))
+        config["budget_tokens"] = config["budget_tokens"] * 2
+        self.assertEqual(store_config.validate_config(config), [])
 
     def test_bad_values_are_rejected(self):
         config = dict(store_config.DEFAULTS)
         config.update(
-            {"warn_at_percent": 0, "replay_window": -1, "carve_out_label": ""}
+            {
+                "warn_at_percent": 0,
+                "replay_window": -1,
+                "carve_out_label": "",
+                "min_gated_cases": 0,
+            }
         )
-        self.assertEqual(len(store_config.validate_config(config)), 3)
+        self.assertEqual(len(store_config.validate_config(config)), 4)
 
     def test_unknown_keys_are_tolerated(self):
         config = dict(store_config.DEFAULTS)
@@ -185,7 +199,7 @@ class CarveOutTests(unittest.TestCase):
     def test_labelled_rewrite_requires_a_replay_report(self):
         diff = "-- old rule\n+- merged rule\n"
         errors, _ = guard.evaluate(
-            commits=[self.commit("pref-promote: merged rule", diff)],
+            commits=[self.commit("pref-compact: merged rule", diff)],
             labels=[self.config["carve_out_label"]],
             body="no report here",
             head_preferences="short",
@@ -217,19 +231,66 @@ class CarveOutTests(unittest.TestCase):
             "candidate_preferences_sha256": guard.preferences_sha256("older text"),
         }
         body = f"{guard.REPLAY_MARKER}\n```json\n{json.dumps(report)}\n```\n"
-        errors = guard.check_replay_report(body, "current text")
+        errors, _ = guard.check_replay_report(body, "current text")
         self.assertTrue(any("different preferences.md" in e for e in errors))
 
     def test_failing_gate_is_rejected(self):
         head = "compacted"
+        body = self._body("fail", head)
+        errors, _ = guard.check_replay_report(body, head)
+        self.assertTrue(any("gate is" in e for e in errors))
+
+    def test_failing_gate_is_not_waivable(self):
+        """The waiver covers absent evidence, never a measured regression."""
+        head = "compacted"
+        errors, _ = guard.check_replay_report(
+            self._body("fail", head), head, waived=True, waiver_label="waiver"
+        )
+        self.assertTrue(any("gate is" in e for e in errors))
+
+    def test_insufficient_evidence_is_rejected_without_the_waiver(self):
+        head = "compacted"
+        errors, _ = guard.check_replay_report(
+            self._body(replay.GATE_INSUFFICIENT, head, gated_cases=3),
+            head,
+            waiver_label="waiver",
+        )
+        self.assertTrue(any("below the" in e for e in errors))
+
+    def test_insufficient_evidence_passes_with_the_waiver(self):
+        head = "compacted"
+        errors, notes = guard.check_replay_report(
+            self._body(replay.GATE_INSUFFICIENT, head, gated_cases=3),
+            head,
+            waived=True,
+            waiver_label="waiver",
+        )
+        self.assertEqual(errors, [])
+        self.assertTrue(any("human judgement" in note for note in notes))
+
+    def test_waiver_label_reaches_the_report_check(self):
+        """The label lives in config; evaluate() must thread it through."""
+        head = "compacted"
+        config = dict(self.config)
+        errors, _ = guard.evaluate(
+            commits=[self.commit("pref-compact: merged rule", "-- old\n+- new\n")],
+            labels=[config["carve_out_label"], config["replay_waiver_label"]],
+            body=self._body(replay.GATE_INSUFFICIENT, head, gated_cases=3),
+            head_preferences=head,
+            preferences_touched=True,
+            config=config,
+        )
+        self.assertEqual(errors, [])
+
+    @staticmethod
+    def _body(gate, head, gated_cases=9):
         report = {
-            "gate": "fail",
+            "gate": gate,
+            "gated_cases": gated_cases,
+            "min_gated_cases": 8,
             "candidate_preferences_sha256": guard.preferences_sha256(head),
         }
-        body = f"{guard.REPLAY_MARKER}\n```json\n{json.dumps(report)}\n```\n"
-        self.assertTrue(
-            any("gate is" in e for e in guard.check_replay_report(body, head))
-        )
+        return f"{guard.REPLAY_MARKER}\n```json\n{json.dumps(report)}\n```\n"
 
 
 class BudgetGateTests(unittest.TestCase):
@@ -402,6 +463,295 @@ class CorpusReplayTests(unittest.TestCase):
         for case in cases["cases"]:
             self.assertIn("question", case)
             self.assertTrue(case["options"])
+
+
+class SlotPermutationTests(unittest.TestCase):
+    """Slot position must carry no signal — it used to carry most of it."""
+
+    @staticmethod
+    def _record(record_id, chosen_slot=1):
+        options = [
+            {"slot": 1, "label": "predicted", "role": "prediction", "rules_cited": []},
+            {"slot": 2, "label": "recommended", "role": "recommendation"},
+            {"slot": 3, "label": "wildcard", "role": "wildcard"},
+        ]
+        return make_record(record_id, chosen_slot, options=options)
+
+    def test_presented_slots_are_renumbered_and_shuffled(self):
+        """Some record in a spread must move, or nothing was permuted."""
+        moved = False
+        for index in range(12):
+            record = self._record(f"202607{index:02d}T143205Z-a")
+            case = replay.mask_record(record)
+            self.assertEqual([o["slot"] for o in case["options"]], [1, 2, 3])
+            if case["options"][0]["label"] != "predicted":
+                moved = True
+        self.assertTrue(moved)
+
+    def test_the_permutation_is_stable_for_one_id(self):
+        record = self._record("20260715T143205Z-a")
+        first = [o["label"] for o in replay.mask_record(record)["options"]]
+        second = [o["label"] for o in replay.mask_record(record)["options"]]
+        self.assertEqual(first, second)
+
+    def test_unmap_inverts_the_presentation_order(self):
+        record = self._record("20260715T143205Z-a")
+        case = replay.mask_record(record)
+        for option in case["options"]:
+            recorded = replay.unmap_slot(record, option["slot"])
+            self.assertEqual(option["label"], self._label_of(record, recorded))
+
+    def test_free_text_slot_beyond_the_options_maps_to_itself(self):
+        """chosen_slot 4 against three options was never presented."""
+        record = self._record("20260715T143205Z-a", chosen_slot=4)
+        self.assertEqual(replay.unmap_slot(record, 4), 4)
+
+    def test_scoring_un_maps_before_comparing(self):
+        record = self._record("20260715T143205Z-a", chosen_slot=3)
+        case = replay.mask_record(record)
+        presented = next(
+            option["slot"]
+            for option in case["options"]
+            if option["label"] == self._label_of(record, 3)
+        )
+        predictions, _ = replay.normalise_predictions(
+            [make_prediction(record["id"], presented)]
+        )
+        report, errors = replay.score([record], predictions, 20, "prefs")
+        self.assertEqual(errors, [])
+        self.assertTrue(report["cases"][0]["hit"])
+        self.assertEqual(report["cases"][0]["predicted_slot"], 3)
+        self.assertEqual(report["cases"][0]["presented_slot"], presented)
+
+    def test_cases_never_ship_the_mapping(self):
+        """A shipped mapping hands the ordering signal straight back."""
+        payload = replay.build_cases([self._record("20260715T143205Z-a")], 20)
+        rendered = json.dumps(payload)
+        self.assertNotIn("role", rendered)
+        self.assertNotIn("slot_map", rendered)
+        self.assertNotIn("recorded_slot", rendered)
+
+    @staticmethod
+    def _label_of(record, slot):
+        return next(o["label"] for o in record["options"] if o["slot"] == slot)
+
+
+class GateVerdictTests(unittest.TestCase):
+    """Small-n must not read as validation."""
+
+    def test_small_gated_stream_is_insufficient_evidence_not_pass(self):
+        baseline = ReplayTests._report(pd=(3, 3), cold=(1, 5), sha="base")
+        candidate = ReplayTests._report(pd=(3, 3), cold=(1, 5), sha="cand")
+        result = replay.gate(baseline, candidate, min_gated_cases=8)
+        self.assertEqual(result["gate"], replay.GATE_INSUFFICIENT)
+        self.assertEqual(result["gated_cases"], 3)
+        self.assertEqual(result["reasons"], [])
+        self.assertTrue(result["notes"])
+
+    def test_a_large_enough_stream_still_passes(self):
+        baseline = ReplayTests._report(pd=(8, 9), cold=(1, 5), sha="base")
+        candidate = ReplayTests._report(pd=(8, 9), cold=(1, 5), sha="cand")
+        self.assertEqual(
+            replay.gate(baseline, candidate, min_gated_cases=8)["gate"],
+            replay.GATE_PASS,
+        )
+
+    def test_degradation_outranks_insufficient_evidence(self):
+        """A regression visible at small n is still a regression."""
+        baseline = ReplayTests._report(pd=(3, 3), cold=(1, 5), sha="base")
+        candidate = ReplayTests._report(pd=(1, 3), cold=(1, 5), sha="cand")
+        self.assertEqual(
+            replay.gate(baseline, candidate, min_gated_cases=8)["gate"],
+            replay.GATE_FAIL,
+        )
+
+    def test_default_threshold_of_zero_keeps_the_old_behaviour(self):
+        baseline = ReplayTests._report(pd=(1, 1), cold=(0, 0), sha="base")
+        candidate = ReplayTests._report(pd=(1, 1), cold=(0, 0), sha="cand")
+        self.assertEqual(replay.gate(baseline, candidate)["gate"], replay.GATE_PASS)
+
+
+class ExtractionTests(unittest.TestCase):
+    def test_no_marker_means_the_whole_corpus(self):
+        records = [make_record(f"2026071{i}T143205Z-a", 1) for i in range(3)]
+        self.assertEqual(len(extraction.unprocessed(records, None)), 3)
+
+    def test_the_marker_excludes_itself_and_everything_older(self):
+        records = [make_record(f"2026071{i}T143205Z-a", 1) for i in range(4)]
+        pending = extraction.unprocessed(records, records[1]["id"])
+        self.assertEqual([r["id"] for r in pending], [r["id"] for r in records[2:]])
+
+    def test_queues_rank_corrections_above_misses(self):
+        correction = make_record("20260715T143205Z-a", 1)
+        correction.update({"correction": True, "outcome": "miss"})
+        self.assertEqual(extraction.queue_for(correction), extraction.QUEUE_CORRECTIONS)
+
+    def test_queue_for_each_outcome(self):
+        cases = {
+            "miss": extraction.QUEUE_MISSES,
+            "refined": extraction.QUEUE_REFINEMENTS,
+            "near-tie": extraction.QUEUE_REFINEMENTS,
+            "hit": extraction.QUEUE_CONFIRMATIONS,
+        }
+        for outcome, queue in cases.items():
+            record = make_record("20260715T143205Z-a", 1)
+            record["outcome"] = outcome
+            self.assertEqual(extraction.queue_for(record), queue)
+
+    def test_rule_driven_acceptance_is_flagged(self):
+        """A rule that cited itself into the chosen slot proves nothing."""
+        record = make_record("20260715T143205Z-a", 1)
+        record["options"][0]["rules_cited"] = ["some rule"]
+        self.assertTrue(extraction.is_rule_driven_acceptance(record))
+
+    def test_a_cited_rule_that_lost_is_not_flagged(self):
+        record = make_record("20260715T143205Z-a", 2)
+        record["options"][0]["rules_cited"] = ["some rule"]
+        self.assertFalse(extraction.is_rule_driven_acceptance(record))
+
+    def test_uncited_prediction_is_not_flagged(self):
+        self.assertFalse(
+            extraction.is_rule_driven_acceptance(make_record("20260715T143205Z-a", 1))
+        )
+
+    def test_batch_reports_next_marker_and_counts(self):
+        records = [make_record(f"2026071{i}T143205Z-a", 1) for i in range(3)]
+        batch = extraction.build_batch(records, None)
+        self.assertEqual(batch["count"], 3)
+        self.assertEqual(batch["next_marker"], records[-1]["id"])
+        self.assertEqual(sum(batch["queue_counts"].values()), 3)
+
+    def test_an_empty_batch_leaves_the_marker_alone(self):
+        records = [make_record("20260715T143205Z-a", 1)]
+        batch = extraction.build_batch(records, records[0]["id"])
+        self.assertEqual(batch["count"], 0)
+        self.assertEqual(batch["next_marker"], records[0]["id"])
+
+    def test_summaries_keep_the_output_side(self):
+        """Unlike replay, extraction reads what the decider actually did."""
+        summary = extraction.summarise(make_record("20260715T143205Z-a", 2))
+        self.assertEqual(summary["chosen_slot"], 2)
+        self.assertIn("operative_reason", summary)
+
+    def test_marker_round_trips(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(extraction.load_marker(tmp))
+            extraction.write_marker(tmp, "20260715T143205Z-a")
+            self.assertEqual(extraction.load_marker(tmp), "20260715T143205Z-a")
+
+    def test_marker_must_name_an_existing_record(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            extraction.write_marker(tmp, "20260715T143205Z-gone")
+            errors = extraction.check_marker(tmp, {"20260715T143205Z-a"})
+            self.assertTrue(any("not a record" in e for e in errors))
+
+    def test_a_null_marker_is_valid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            extraction.write_marker(tmp, None)
+            self.assertEqual(extraction.check_marker(tmp, set()), [])
+
+    def test_a_corrupt_marker_is_an_error_not_a_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(
+                os.path.join(tmp, extraction.MARKER_FILENAME), "w", encoding="utf-8"
+            ) as handle:
+                handle.write("{nope")
+            self.assertTrue(extraction.check_marker(tmp, set()))
+
+
+class CommitTypeTests(unittest.TestCase):
+    """The commit lint is the grammar half of docs/conventions.md."""
+
+    def test_the_repos_types_are_accepted(self):
+        subjects = [
+            "decision(factory): agent-access — collaborators over deploy keys",
+            "pref-proposal: prefers the simplest solution",
+            "pref-promote: rejects new infrastructure dependencies",
+            "pref-confirm: rejects new infrastructure dependencies (n=4)",
+            "pref-compact: compact active set — 7 rules -> 4",
+            "pref-drift: infrastructure rule mispredicts solution shape",
+            "chore: extraction marker -> 20260715T143205Z-a",
+        ]
+        for subject in subjects:
+            self.assertIsNone(guards.check_commit_subject(subject), subject)
+
+    def test_an_unknown_type_is_rejected(self):
+        self.assertIsNotNone(guards.check_commit_subject("feat: add a thing"))
+
+    def test_compaction_may_remove_preference_lines(self):
+        self.assertIn("pref-compact:", guards.PREF_EDIT_TYPES)
+
+    def test_drift_may_not_remove_preference_lines(self):
+        """Drift proposes; it never rewrites the active set."""
+        self.assertNotIn("pref-drift:", guards.PREF_EDIT_TYPES)
+
+
+class FixtureStoreTests(unittest.TestCase):
+    """A throwaway store, so the guard is exercised without a real one.
+
+    The real-corpus checks skip in the template that vendors these
+    files — no `decisions/` exists there. This builds one, which is
+    what makes a template-side edit unable to ship a broken guard.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+        os.makedirs(os.path.join(self.root, "decisions"))
+        self.records = [
+            make_record(f"2026071{i}T14320{i}Z-fixture-case", 1) for i in range(3)
+        ]
+        for record in self.records:
+            self._write_record(record)
+        self._write(
+            "preferences.md", "- a short rule. [confirmed: 1, last: 2026-07-15]\n"
+        )
+        self._write("store.config.json", json.dumps({"budget_tokens": 2000}))
+
+    def _write_record(self, record):
+        path = os.path.join(self.root, "decisions", f"{record['id']}.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(record, handle)
+
+    def _write(self, name, text):
+        with open(os.path.join(self.root, name), "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def test_the_fixture_corpus_is_clean(self):
+        self.assertEqual(guards.check_corpus(self.root), [])
+
+    def test_the_budget_comes_from_the_repo_local_config(self):
+        """Lower the store's budget and the vendored guard must fail."""
+        self._write("store.config.json", json.dumps({"budget_tokens": 1}))
+        errors = guards.check_corpus(self.root)
+        self.assertTrue(any("exceeds the 1 budget" in e for e in errors))
+
+    def test_a_budget_above_the_vendored_default_is_enforced_as_given(self):
+        self._write("preferences.md", "x" * 12000)
+        self._write("store.config.json", json.dumps({"budget_tokens": 4000}))
+        self.assertEqual(guards.check_corpus(self.root), [])
+
+    def test_a_dangling_marker_fails_the_corpus_check(self):
+        extraction.write_marker(self.root, "20260715T143205Z-never-recorded")
+        errors = guards.check_corpus(self.root)
+        self.assertTrue(any("not a record" in e for e in errors))
+
+    def test_a_valid_marker_passes_and_scopes_the_next_batch(self):
+        extraction.write_marker(self.root, self.records[0]["id"])
+        self.assertEqual(guards.check_corpus(self.root), [])
+        records = replay.load_records(self.root)
+        batch = extraction.build_batch(records, extraction.load_marker(self.root))
+        self.assertEqual(batch["count"], 2)
+
+    def test_replay_builds_cases_from_the_fixture_corpus(self):
+        cases = replay.build_cases(replay.load_records(self.root), 20)
+        self.assertEqual(cases["count"], 3)
+        self.assertEqual(cases["slot_order"], "permuted")
+
+    def test_a_broken_config_fails_the_corpus_check_loudly(self):
+        self._write("store.config.json", "{nope")
+        self.assertTrue(guards.check_corpus(self.root))
 
 
 if __name__ == "__main__":

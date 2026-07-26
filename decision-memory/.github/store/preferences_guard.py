@@ -4,9 +4,8 @@ Copier-vendored from the agentic-engineering-template guard
 subtemplate — change it there, pull via `copier update`.
 
 Sits on top of the record guard (`.github/guards/guards.py`), which
-stays untouched and keeps enforcing append-only `decisions/`, the
-schema, and its own hard token backstop. This layer adds the three
-rules the compaction flow needs:
+keeps enforcing append-only `decisions/`, the schema, and the token
+budget. This layer adds the three rules the compaction flow needs:
 
 1. **Carve-out label.** Editing an EXISTING line in `preferences.md`
    requires the carve-out label on the PR. Pure additions never need
@@ -17,7 +16,10 @@ rules the compaction flow needs:
 2. **Replay regression.** A carve-out PR must carry a replay report in
    its description, gated `pass`, and produced against the exact
    `preferences.md` in the PR head — the report embeds the file's
-   sha256, so a stale report from an earlier round fails.
+   sha256, so a stale report from an earlier round fails. A gate of
+   `insufficient-evidence` (nothing degraded, too few gated cases to
+   say so meaningfully) merges only with the waiver label, so a human
+   owns it explicitly. A `fail` gate is never waivable.
 3. **Budget.** A PR that touches `preferences.md` fails when the file
    is over 100% of the repo-local budget; at or above the warn
    threshold it prints a warning but passes.
@@ -34,7 +36,6 @@ Stdlib only. Usage (see .github/workflows/preferences-guard.yml):
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -50,20 +51,19 @@ sys.path.insert(
 import budget as store_budget  # noqa: E402  (path bootstrap above)
 import config as store_config  # noqa: E402  (path bootstrap above)
 import guards  # noqa: E402  (path bootstrap above; vendored, read-only)
+import replay  # noqa: E402  (path bootstrap above)
 
 PREFERENCES_FILENAME = store_budget.PREFERENCES_FILENAME
+
+# Re-export: the content address lives in `replay`, which produces the
+# reports this module verifies, so the dependency only runs one way.
+preferences_sha256 = replay.preferences_sha256
 
 REPLAY_MARKER = "<!-- replay-report -->"
 _REPLAY_FENCE_RE = re.compile(
     re.escape(REPLAY_MARKER) + r"\s*```(?:json)?\s*\n(.*?)\n```",
     re.DOTALL,
 )
-
-
-def preferences_sha256(text: str) -> str:
-    """Content address of a preference set — what ties a replay report
-    to the exact rules it was scored against."""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def classify_pref_commits(commits: list[dict]) -> tuple[bool, list[str]]:
@@ -113,15 +113,44 @@ def extract_replay_report(body: str) -> tuple[dict | None, str | None]:
     return report, None
 
 
-def check_replay_report(body: str, head_preferences: str) -> list[str]:
-    """Validate the replay report of a carve-out PR."""
+def check_replay_report(
+    body: str, head_preferences: str, waived: bool = False, waiver_label: str = ""
+) -> tuple[list[str], list[str]]:
+    """Validate the replay report of a carve-out PR.
+
+    Returns ``(errors, notes)``. A ``fail`` gate is never waivable — it
+    is a measured regression. An ``insufficient-evidence`` gate is: the
+    compaction did not degrade anything, there were simply too few
+    preference-driven cases for the pass to carry evidence. Merging
+    that is a judgement call, so it needs `waiver_label` on the PR and
+    lands in the log as one — which is the whole point of not calling
+    it `pass`.
+    """
     report, error = extract_replay_report(body)
     if error:
-        return [error]
+        return [error], []
     assert report is not None
     errors: list[str] = []
+    notes: list[str] = []
     gate = report.get("gate")
-    if gate != "pass":
+    if gate == replay.GATE_INSUFFICIENT:
+        gated = report.get("gated_cases")
+        minimum = report.get("min_gated_cases")
+        if waived:
+            notes.append(
+                f"replay gate is {gate!r} ({gated} of {minimum} "
+                f"preference-driven cases) and the {waiver_label!r} label is "
+                "present — merging an unvalidated compaction on human judgement"
+            )
+        else:
+            errors.append(
+                f"replay gate is {gate!r}: {gated} preference-driven case(s), "
+                f"below the {minimum} this store requires. Nothing degraded, "
+                "but nothing was validated either — extract rules to grow the "
+                f"gated stream, or apply the {waiver_label!r} label to own the "
+                "merge explicitly"
+            )
+    elif gate != replay.GATE_PASS:
         errors.append(
             f"replay report gate is {gate!r}, not 'pass' — the compacted rule "
             "set must not degrade the preference-driven hit rate"
@@ -134,7 +163,7 @@ def check_replay_report(body: str, head_preferences: str) -> list[str]:
             f"(report {str(reported)[:12]}… vs head {actual[:12]}…) — re-run "
             "the replay after the last edit"
         )
-    return errors
+    return errors, notes
 
 
 def evaluate(
@@ -159,7 +188,15 @@ def evaluate(
                 "the active set (counter bumps via pref-confirm are exempt)"
             )
         else:
-            errors.extend(check_replay_report(body, head_preferences))
+            waiver_label = config["replay_waiver_label"]
+            report_errors, report_notes = check_replay_report(
+                body,
+                head_preferences,
+                waived=waiver_label in labels,
+                waiver_label=waiver_label,
+            )
+            errors.extend(report_errors)
+            notes.extend(report_notes)
     elif label in labels:
         notes.append(
             f"{label!r} label present but no existing line was edited — nothing to gate"

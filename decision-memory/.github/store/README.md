@@ -6,15 +6,16 @@ change them in the template and pull via `copier update`.
 
 Everything under `.github/store/`, plus
 `.github/workflows/preferences-budget.yml`,
-`.github/workflows/preferences-guard.yml` and
-`.claude/skills/compact-preferences/`, is vendored alongside the
-record guard in `.github/guards/`.
-This layer sits on top of that one and imports it read-only,
-so the vendored contract stays the single authority for records.
+`.github/workflows/preferences-guard.yml` and the
+`extract-preferences` and `compact-preferences` skills, is vendored
+alongside the record guard in `.github/guards/`.
 
 The two directories stay separate because they answer to different
 things: `guards/` gates the record corpus, `store/` runs the
 preference-set lifecycle on top of it.
+They are not separate trust domains — the record guard reads this
+layer's config for the token budget, so there is one budget number and
+one place to change it.
 Both are vendored, so neither can drift from the schema —
 which is the point.
 N stores share one budget rule, one carve-out rule, one replay gate.
@@ -28,9 +29,13 @@ the store, so a human adjusts the knobs below without fighting
 `preferences.md` is injected into every grilled session. Everything in
 it costs context on every session, forever — so it is a hard budget,
 not a wishlist, and shrinking it needs to be safe rather than brave.
-That gives three jobs: measure the budget, protect the file from
-casual edits, and make a compaction provably non-degrading before it
-merges.
+That gives four jobs: grow the set from what the records actually
+show, measure the budget, protect the file from casual edits, and make
+a compaction provably non-degrading before it merges.
+
+Growing comes first. Until rules are extracted, every record is
+recorded `prediction_stream: cold`, the preference-driven stream is
+empty, and the compaction gate has nothing to measure.
 
 ## Configuration
 
@@ -43,20 +48,26 @@ these knobs:
 | `warn_at_percent` | 80 | "compression due" threshold |
 | `carve_out_label` | `preferences-carve-out` | label permitting edits to existing lines |
 | `budget_issue_label` | `preferences-budget` | label on the automated budget issue |
+| `replay_waiver_label` | `preferences-replay-waiver` | label accepting an `insufficient-evidence` gate |
 | `replay_window` | 20 | how many recent decisions the replay scores |
+| `min_gated_cases` | 8 | below this many preference-driven cases the gate reports `insufficient-evidence` |
 
 A missing file is fine — the defaults are the contract. Unknown keys
 are tolerated (`_comment` is one), invalid values fail loudly.
 
-`budget_tokens` cannot exceed the vendored
-`decision_validator.PREFERENCES_TOKEN_BUDGET`: the vendored guard
-would fail the PR first, so a higher local value would be a lie.
-Raising it means raising it in the template's decision-memory subtemplate and
-pulling that through `copier update`.
+`budget_tokens` is the ONLY budget. The vendored record guard loads
+this config and enforces whatever the store chose;
+`decision_validator.PREFERENCES_TOKEN_BUDGET` is the default it falls
+back to when a store ships no config file, not a ceiling over it. One
+number, one place to change it, checked once.
 
-Token counting is not reimplemented here — `estimate_tokens` from the
-vendored validator is the single authority, so this layer and the
-vendored guard can never disagree about how big the file is.
+Token counting is not reimplemented here either — `estimate_tokens`
+from the vendored validator is the single authority, so this layer and
+the vendored guard can never disagree about how big the file is.
+
+`extraction-marker.json` is store-owned for the same reason: it is
+per-store state, and `copier update` clobbering it would silently
+re-run extraction over a batch already processed.
 
 ## Enforcement
 
@@ -78,9 +89,17 @@ it never blocks.
   `pass`, whose `candidate_preferences_sha256` matches the
   `preferences.md` in the PR head — a stale report from an earlier
   round fails.
+- A report gated `insufficient-evidence` merges only with
+  `replay_waiver_label` on the PR. A report gated `fail` never merges;
+  the waiver does not apply to a measured regression.
+
+The vendored record guard additionally checks that
+`extraction-marker.json` names a record that exists — a marker
+pointing at nothing would silently skip or re-process a whole batch,
+and that failure is indistinguishable from "extraction found nothing".
 
 `decisions/` gets **no carve-out**. Append-only there is absolute and
-this layer does not touch that rule.
+neither this layer nor extraction touches that rule.
 
 ## Replay regression
 
@@ -98,8 +117,9 @@ python .github/store/replay.py gate    --baseline base.json \
 `cases` masks each record to its input side and strips the fields that
 leak the old rule set's answer (`role`, `rules_cited`, and the
 in-session `reasoning`). `score` joins an agent's predictions with the
-recorded `chosen_slot`. `gate` compares two scored runs and exits
-non-zero when the **preference-driven** hit rate degrades.
+recorded `chosen_slot`. `gate` compares two scored runs: exit 0 on
+`pass`, 1 on `fail` when the **preference-driven** hit rate degrades,
+and 3 on `insufficient-evidence`.
 
 Two streams, exactly as recording uses them: a prediction citing rules
 scores preference-driven, one citing none scores cold. The gate is the
@@ -109,10 +129,63 @@ and never gated. Cases that change stream under the candidate set are
 counted separately, so a hit-rate change caused by re-labelling rather
 than by better rules is visible.
 
-Slot order is deliberately left alone: slot 1 is the prediction slot
-by convention, so some ordering signal survives masking. It is
-identical across both runs, which is what a before/after comparison
-needs.
+### What the calibration fixed
+
+A null test — two blind runs over the *same* rule set — passed the
+gate by luck rather than by design, and both problems are addressed
+here.
+
+**The gated denominator was unstable.** Both runs picked the same slot
+on all 17 cases but disagreed on whether a rule drove the pick for 4
+of them, so `n` moved 3 -> 5 under a change that was not a change. At
+that size one case flipping swings the hit rate 20-33 points, so a
+`pass` meant nothing. `min_gated_cases` is the answer: below it the
+gate reports `insufficient-evidence`, and merging takes a waiver label
+that puts a human's name on an unvalidated compaction. On a corpus
+with no extracted rules, every compaction needs the waiver — that is
+the honest state, and it is meant to be visible rather than papered
+over with a green check.
+
+**Slot ordering leaked.** `chosen_slot` was 1 in 14 of 17 records, so
+a blind "always slot 1" scored 82% and both runs scored 94%. Masking
+stripped `role` and `rules_cited` but left slot order, and slot 1 is
+the prediction slot by convention. `cases` now presents each record's
+options in an order derived from its ID and `score` derives the same
+order to map predictions back, so the number measures rules rather
+than ordering. The mapping is never written into the cases file:
+shipping it would hand the signal straight back.
+
+The remaining calibration is data, not code — the gate is trustworthy
+once records carry `prediction_stream: preference-driven`, which is
+what extraction produces. Re-run the null test then.
+
+## Extraction
+
+`extraction.py` is the read side of the growth half, driven by the
+`extract-preferences` skill:
+
+```bash
+python .github/store/extraction.py status
+python .github/store/extraction.py batch --out batch.json
+python .github/store/extraction.py mark --record-id <id>
+```
+
+`batch` emits every record after the marker, sorted into four queues in
+descending evidence order — `corrections`, `misses`, `refinements`,
+`confirmations` — plus the rule-driven acceptances, where a rule cited
+itself into the prediction slot and that slot was chosen. Those confirm
+nothing: the recommendation caused the choice it would be credited with
+predicting. They are flagged precisely because counting them is
+tempting.
+
+The pass is a BATCH, never per-session: the evidence extraction looks
+for is cross-session repetition, which no single session can see.
+
+The marker is a record ID, not a commit SHA. IDs begin with a UTC
+timestamp and `decisions/` is append-only, so "which records are new"
+is a string comparison over the corpus — no git archaeology, nothing
+to break when history is rewritten around it, and a guard check that
+can actually verify the marker points at something real.
 
 ## Tests
 
@@ -126,11 +199,6 @@ real corpus, so a record the harness cannot handle fails CI.
 
 ## Known seams
 
-- The compaction commit type is `pref-promote:` because that is the
-  only vendored type allowed to remove lines from `preferences.md`.
-  Compaction is not promotion; the human gate is the merge, not the
-  commit authorship. A dedicated `pref-compact:` type would be
-  cleaner and needs a template-side change.
 - Nothing here is store-local any more,
   so a store that wants a different budget policy cannot have one —
   it gets the vendored policy and tunes it through `store.config.json`.

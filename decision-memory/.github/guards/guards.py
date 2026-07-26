@@ -8,14 +8,17 @@ the guard must keep working even if the template repo disappears.
 Checks, per PR (run with --base <base-sha> from a full checkout):
 
 1. Append-only: no modify/delete/rename under decisions/**; line
-   removals in preferences.md only from pref-confirm/pref-promote
-   commits, with pref-confirm counter math validated mechanically.
+   removals in preferences.md only from pref-confirm/pref-promote/
+   pref-compact commits, with pref-confirm counter math validated
+   mechanically.
 2. Full-corpus schema check: EVERY decisions/*.json validates (not
    just added files), so guard updates re-validate the entire corpus.
 3. Dangling-reference check across the corpus.
-4. Token budget on preferences.md.
+4. Token budget on preferences.md, against the repo-local budget.
 5. Commit lint: every PR commit subject uses one of the repo's own
-   types (decision/pref-proposal/pref-promote/pref-confirm/chore).
+   types (decision/pref-proposal/pref-promote/pref-confirm/
+   pref-compact/pref-drift/chore).
+6. Extraction marker: names a record that exists in the corpus.
 """
 
 from __future__ import annotations
@@ -28,8 +31,14 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(
+    0,
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "store"),
+)
 
+import config as store_config  # noqa: E402  (path bootstrap above)
 import decision_validator  # noqa: E402  (path bootstrap above)
+import extraction  # noqa: E402  (path bootstrap above)
 
 # Match-side of the repo's own commit types. Grammar authority:
 # docs/conventions.md (§ Commit types, vendored with this file); the
@@ -39,12 +48,20 @@ COMMIT_SUBJECT_RES = (
     re.compile(r"^pref-proposal: .+$"),
     re.compile(r"^pref-promote: .+$"),
     re.compile(r"^pref-confirm: .+ \(n=\d+\)$"),
+    re.compile(r"^pref-compact: .+$"),
+    re.compile(r"^pref-drift: .+$"),
     re.compile(r"^chore(\([\w-]+\))?: .+$"),
 )
 
 COUNTER_RE = decision_validator.COUNTER_RE
 
-PREF_EDIT_TYPES = ("pref-confirm:", "pref-promote:")
+# The types permitted to REMOVE lines from preferences.md. Promotion and
+# compaction are different acts on the same file: promotion adds a rule a
+# human decided to adopt (and may demote another to make room); compaction
+# rewrites the set without adding anything that was not already promoted.
+# Typing them apart is what lets a reader tell one from the other in the
+# log — the human gate on both is the merge, not the commit subject.
+PREF_EDIT_TYPES = ("pref-confirm:", "pref-promote:", "pref-compact:")
 
 
 def check_commit_subject(subject: str) -> str | None:
@@ -55,7 +72,8 @@ def check_commit_subject(subject: str) -> str | None:
     return (
         f"commit subject {subject!r} matches none of the repo's types: "
         "decision(<project>): <slug> — <chosen> | pref-proposal: | "
-        "pref-promote: | pref-confirm: ... (n=N) | chore:"
+        "pref-promote: | pref-confirm: ... (n=N) | pref-compact: | "
+        "pref-drift: | chore:"
     )
 
 
@@ -144,7 +162,7 @@ def check_commits(base: str) -> list[str]:
         if not subject.startswith(PREF_EDIT_TYPES):
             errors.append(
                 f"{sha[:9]}: removes lines from preferences.md but is not "
-                "a pref-confirm/pref-promote commit"
+                "a pref-confirm/pref-promote/pref-compact commit"
             )
         elif subject.startswith("pref-confirm:"):
             errors.extend(
@@ -153,11 +171,22 @@ def check_commits(base: str) -> list[str]:
     return errors
 
 
-def check_corpus() -> list[str]:
-    """Validate the ENTIRE decisions/ corpus + refs + token budget."""
+def check_corpus(root: str = ".") -> list[str]:
+    """Validate the ENTIRE decisions/ corpus + refs + budget + marker.
+
+    The token budget comes from the repo-local `store.config.json`
+    (`budget_tokens`), not from a constant in this file: the budget is
+    per-principal, and a second authority for it would only ever
+    disagree with the first. `decision_validator`'s constant is the
+    DEFAULT that config falls back to when a store ships no file.
+    """
     errors: list[str] = []
     records: dict[str, dict] = {}
-    decisions_dir = "decisions"
+    try:
+        config = store_config.load_config(root)
+    except store_config.ConfigError as exc:
+        return [str(exc)]
+    decisions_dir = os.path.join(root, "decisions")
     if os.path.isdir(decisions_dir):
         for name in sorted(os.listdir(decisions_dir)):
             if name.startswith("."):
@@ -180,9 +209,15 @@ def check_corpus() -> list[str]:
             if isinstance(record, dict) and isinstance(record.get("id"), str):
                 records[record["id"]] = record
         errors.extend(decision_validator.validate_corpus(records))
-    if os.path.isfile("preferences.md"):
-        with open("preferences.md", encoding="utf-8") as handle:
-            errors.extend(decision_validator.check_preferences_budget(handle.read()))
+    preferences_path = os.path.join(root, "preferences.md")
+    if os.path.isfile(preferences_path):
+        with open(preferences_path, encoding="utf-8") as handle:
+            errors.extend(
+                decision_validator.check_preferences_budget(
+                    handle.read(), int(config["budget_tokens"])
+                )
+            )
+    errors.extend(extraction.check_marker(root, set(records)))
     return errors
 
 

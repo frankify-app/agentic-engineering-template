@@ -17,12 +17,14 @@ PROJECT_ROOT = Path(__file__).parent.parent
 STORE_FILES = frozenset(
     {
         ".agents/skills/compact-preferences/SKILL.md",
+        ".agents/skills/extract-preferences/SKILL.md",
         ".copier-answers.agentic.yml",
         ".github/guards/decision_validator.py",
         ".github/guards/guards.py",
         ".github/store/README.md",
         ".github/store/budget.py",
         ".github/store/config.py",
+        ".github/store/extraction.py",
         ".github/store/preferences_guard.py",
         ".github/store/replay.py",
         ".github/store/tests/test_store.py",
@@ -35,6 +37,7 @@ STORE_FILES = frozenset(
         "README.md",
         "docs/conventions.md",
         "docs/extraction-prompt.md",
+        "extraction-marker.json",
         "preferences.md",
         "store.config.json",
         "tools/record.py",
@@ -149,6 +152,40 @@ def test_store_config_survives_a_re_render(tmp_path: Path) -> None:
         vcs_ref="HEAD",
     )
     assert config.read_text() == tuned
+
+
+def test_extraction_marker_survives_a_re_render(tmp_path: Path) -> None:
+    """The watermark is per-store state, not template content.
+
+    Clobbering it on update would silently re-run extraction over a
+    batch already processed — and a duplicate pass looks exactly like a
+    first one.
+    """
+    dst_path = _render_store(tmp_path)
+    marker = dst_path / "extraction-marker.json"
+    assert '"last_extracted_record_id": null' in marker.read_text()
+    advanced = '{"last_extracted_record_id": "20260715T143205Z-agent-access"}\n'
+    marker.write_text(advanced)
+    copier.run_copy(
+        src_path=str(PROJECT_ROOT),
+        dst_path=dst_path,
+        data={"agentic_subtemplate": "decision-memory"},
+        defaults=True,
+        unsafe=True,
+        skip_tasks=True,
+        overwrite=True,
+        vcs_ref="HEAD",
+    )
+    assert marker.read_text() == advanced
+
+
+def test_store_render_ships_both_lifecycle_skills(tmp_path: Path) -> None:
+    """Extraction grows the set, compaction shrinks it — a store that
+    got only one half would have no way to run the other."""
+    dst_path = _render_store(tmp_path)
+    skills = dst_path / ".agents" / "skills"
+    assert (skills / "extract-preferences" / "SKILL.md").is_file()
+    assert (skills / "compact-preferences" / "SKILL.md").is_file()
 
 
 def test_default_render_contains_no_guard_files(
