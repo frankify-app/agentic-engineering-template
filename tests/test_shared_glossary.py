@@ -14,8 +14,11 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import shutil
+import subprocess
 
 import copier
+import pytest
 
 PROJECT_ROOT = Path(__file__).parent.parent
 SOURCE_DIR = PROJECT_ROOT / "template" / "docs" / "glossary"
@@ -138,3 +141,48 @@ def test_shared_terms_are_repo_neutral() -> None:
         assert body.startswith("## "), f"{term}: entry must open with its H2 name"
         assert "factory" not in body.lower(), f"{term}: references un-promoted term"
         assert "this repo" not in body.lower(), f"{term}: repo-specific framing"
+
+
+# Host tools the post-render _tasks invoke.
+PRUNE_REQUIRED_TOOLS = ("git", "npx", "uvx", "prek")
+
+
+def test_a_stamped_repo_keeps_only_the_shared_terms_it_links(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """The stamp converges the glossary instead of accumulating it.
+
+    A consumer receives all eight terms and keeps the ones it links, so
+    `disambiguate --lint` passes on a repo that did nothing wrong. Here
+    the README links none of them, so the whole consenting branch goes
+    and the repo's own seed term — which never consented — stays.
+
+    Runs the real task list: the convergence has to happen during the
+    stamp, or every consumer carries the same cleanup by hand.
+    """
+    missing = [tool for tool in PRUNE_REQUIRED_TOOLS if shutil.which(tool) is None]
+    if missing:
+        pytest.skip(f"post-stamp prune needs host tools on PATH: {missing}")
+
+    dst_path = tmp_path / "consumer"
+    dst_path.mkdir()
+    subprocess.run(["git", "init"], cwd=dst_path, check=True, capture_output=True)
+    (dst_path / "README.md").write_text("# Consumer\n", encoding="utf-8")
+
+    copier.run_copy(
+        src_path=str(PROJECT_ROOT),
+        dst_path=dst_path,
+        data=base_answers,
+        defaults=True,
+        unsafe=True,
+        vcs_ref="HEAD",
+    )
+
+    glossary = dst_path / "docs" / "glossary"
+    survivors = {path.stem for path in glossary.glob("*.md")}
+
+    assert not (survivors & SHARED_TERMS), "unlinked shared terms must be pruned"
+    assert base_answers["agentic_project_slug"] in survivors, (
+        "the repo's own seed term never consented and must survive"
+    )

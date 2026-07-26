@@ -9,6 +9,7 @@ from pathlib import Path
 
 import copier
 import pytest
+import yaml
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -189,6 +190,27 @@ def test_e2e_copy_non_english_omits_codespell(
 # Host tools the post-render _tasks invoke. Missing any → skip the smoke test
 # rather than fail, so the suite stays green on machines without the toolchain.
 SMOKE_REQUIRED_TOOLS = ("git", "npx", "uvx", "prek")
+
+
+def test_reporting_tasks_cannot_roll_back_a_render() -> None:
+    """A task that reports rather than gates must not abort the run.
+
+    Copier rolls the whole render back on a non-zero task, so
+    `scripts/doctor.sh` exiting on a missing host tool loses the stamp
+    entirely. `gh` is deliberately absent from remote agent sessions —
+    the repo CLAUDE.md files say to use forge MCP tools instead — which
+    makes the abort the normal case there rather than an edge one.
+
+    Asserted on the task string because that is where the tolerance
+    lives: doctor's own exit code stays meaningful when invoked directly,
+    so CI and humans still get a hard signal.
+    """
+    tasks = yaml.safe_load((PROJECT_ROOT / "copier.yml").read_text())["_tasks"]
+    reporting = [task for task in tasks if "doctor.sh" in task]
+
+    assert reporting, "the doctor report task must still be in _tasks"
+    for task in reporting:
+        assert "|| true" in task, f"doctor task can abort a render: {task}"
 
 
 def test_e2e_prek_install_registers_git_hooks(
