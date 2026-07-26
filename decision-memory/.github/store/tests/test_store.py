@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -572,14 +573,33 @@ class GateVerdictTests(unittest.TestCase):
 
 
 class ExtractionTests(unittest.TestCase):
-    def test_no_marker_means_the_whole_corpus(self):
-        records = [make_record(f"2026071{i}T143205Z-a", 1) for i in range(3)]
-        self.assertEqual(len(extraction.unprocessed(records, None)), 3)
+    """Scope is the PR's records; evidence is the whole corpus."""
 
-    def test_the_marker_excludes_itself_and_everything_older(self):
-        records = [make_record(f"2026071{i}T143205Z-a", 1) for i in range(4)]
-        pending = extraction.unprocessed(records, records[1]["id"])
-        self.assertEqual([r["id"] for r in pending], [r["id"] for r in records[2:]])
+    @staticmethod
+    def _corpus(n=4):
+        return [make_record(f"2026071{i}T14320{i}Z-case", 1) for i in range(n)]
+
+    def test_scope_is_what_came_after_the_watermark(self):
+        records = self._corpus()
+        batch = extraction.build_batch(records, {records[2]["id"], records[3]["id"]})
+        self.assertEqual(batch["count"], 2)
+        self.assertEqual(batch["scope"], sorted([records[2]["id"], records[3]["id"]]))
+
+    def test_history_carries_everything_outside_the_scope(self):
+        """Cross-session repetition is evidence the pass must still see."""
+        records = self._corpus()
+        batch = extraction.build_batch(records, {records[3]["id"]})
+        self.assertEqual(batch["history_count"], 3)
+        self.assertEqual(
+            [entry["id"] for entry in batch["history"]],
+            [record["id"] for record in records[:3]],
+        )
+
+    def test_an_empty_scope_still_reports_the_corpus(self):
+        records = self._corpus()
+        batch = extraction.build_batch(records, set())
+        self.assertEqual(batch["count"], 0)
+        self.assertEqual(batch["history_count"], 4)
 
     def test_queues_rank_corrections_above_misses(self):
         correction = make_record("20260715T143205Z-a", 1)
@@ -614,49 +634,190 @@ class ExtractionTests(unittest.TestCase):
             extraction.is_rule_driven_acceptance(make_record("20260715T143205Z-a", 1))
         )
 
-    def test_batch_reports_next_marker_and_counts(self):
-        records = [make_record(f"2026071{i}T143205Z-a", 1) for i in range(3)]
-        batch = extraction.build_batch(records, None)
-        self.assertEqual(batch["count"], 3)
-        self.assertEqual(batch["next_marker"], records[-1]["id"])
-        self.assertEqual(sum(batch["queue_counts"].values()), 3)
-
-    def test_an_empty_batch_leaves_the_marker_alone(self):
-        records = [make_record("20260715T143205Z-a", 1)]
-        batch = extraction.build_batch(records, records[0]["id"])
-        self.assertEqual(batch["count"], 0)
-        self.assertEqual(batch["next_marker"], records[0]["id"])
-
     def test_summaries_keep_the_output_side(self):
         """Unlike replay, extraction reads what the decider actually did."""
         summary = extraction.summarise(make_record("20260715T143205Z-a", 2))
         self.assertEqual(summary["chosen_slot"], 2)
         self.assertIn("operative_reason", summary)
 
-    def test_marker_round_trips(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            self.assertIsNone(extraction.load_marker(tmp))
-            extraction.write_marker(tmp, "20260715T143205Z-a")
-            self.assertEqual(extraction.load_marker(tmp), "20260715T143205Z-a")
 
-    def test_marker_must_name_an_existing_record(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            extraction.write_marker(tmp, "20260715T143205Z-gone")
-            errors = extraction.check_marker(tmp, {"20260715T143205Z-a"})
-            self.assertTrue(any("not a record" in e for e in errors))
+class ExtractionWatermarkTests(unittest.TestCase):
+    """The watermark is a commit's position, derived not stored."""
 
-    def test_a_null_marker_is_valid(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            extraction.write_marker(tmp, None)
-            self.assertEqual(extraction.check_marker(tmp, set()), [])
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+        os.makedirs(os.path.join(self.root, "decisions"))
+        self._git("init", "-q")
+        self._git("config", "user.email", "t@e.st")
+        self._git("config", "user.name", "test")
+        self._commit("chore: initialize repository", allow_empty=True)
 
-    def test_a_corrupt_marker_is_an_error_not_a_crash(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with open(
-                os.path.join(tmp, extraction.MARKER_FILENAME), "w", encoding="utf-8"
-            ) as handle:
-                handle.write("{nope")
-            self.assertTrue(extraction.check_marker(tmp, set()))
+    def _git(self, *args):
+        subprocess.run(["git", "-C", self.root, *args], check=True, capture_output=True)
+
+    def _commit(self, subject, allow_empty=False):
+        self._git("add", "-A")
+        args = ["commit", "-qm", subject]
+        if allow_empty:
+            args.insert(1, "--allow-empty")
+        self._git(*args)
+        return subprocess.run(
+            ["git", "-C", self.root, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    def _add_record(self, suffix):
+        record = make_record(f"202607{suffix}T143205Z-case", 1)
+        path = os.path.join(self.root, "decisions", f"{record['id']}.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(record, handle)
+        self._commit(f"decision(f): case-{suffix} — a")
+        return record["id"]
+
+    def test_no_pass_ever_means_the_whole_corpus(self):
+        """Bootstrap is not a mode — it is what an empty history means."""
+        first = self._add_record("01")
+        second = self._add_record("02")
+        scope, watermark = extraction.scope_ids(self.root)
+        self.assertIsNone(watermark)
+        self.assertEqual(scope, {first, second})
+
+    def test_a_pass_moves_the_watermark(self):
+        self._add_record("01")
+        self._commit(f"{extraction.EXTRACTION_PREFIX} 1 record", allow_empty=True)
+        scope, watermark = extraction.scope_ids(self.root)
+        self.assertIsNotNone(watermark)
+        self.assertEqual(scope, set())
+
+    def test_records_after_a_pass_are_the_next_scope(self):
+        self._add_record("01")
+        self._commit(f"{extraction.EXTRACTION_PREFIX} 1 record", allow_empty=True)
+        later = self._add_record("02")
+        scope, _ = extraction.scope_ids(self.root)
+        self.assertEqual(scope, {later})
+
+    def test_an_empty_pass_still_moves_the_watermark(self):
+        """A pass that found nothing produces no proposal and no bump.
+
+        Keying the watermark on those would stall it every time
+        extraction legitimately had nothing to say.
+        """
+        self._add_record("01")
+        sha = self._commit(
+            f"{extraction.EXTRACTION_PREFIX} 1 record, nothing to promote",
+            allow_empty=True,
+        )
+        self.assertEqual(extraction.last_extraction_commit("HEAD", self.root), sha)
+        self.assertEqual(extraction.scope_ids(self.root)[0], set())
+
+    def test_a_pref_confirm_commit_is_not_a_watermark(self):
+        """`submit` emits those, so they would move it for a pass that
+        never ran — a false watermark skips records instead of
+        re-reading them."""
+        self._add_record("01")
+        self._commit("pref-confirm: some rule (n=2)", allow_empty=True)
+        self.assertIsNone(extraction.last_extraction_commit("HEAD", self.root))
+
+    def test_a_body_mention_is_not_a_watermark(self):
+        self._add_record("01")
+        self._git(
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "chore: talk about it",
+            "-m",
+            "we should pref-extract: something eventually",
+        )
+        self.assertIsNone(extraction.last_extraction_commit("HEAD", self.root))
+
+    def test_the_newest_pass_wins(self):
+        self._add_record("01")
+        self._commit(f"{extraction.EXTRACTION_PREFIX} first", allow_empty=True)
+        second = self._add_record("02")
+        newest = self._commit(
+            f"{extraction.EXTRACTION_PREFIX} second", allow_empty=True
+        )
+        self.assertEqual(extraction.last_extraction_commit("HEAD", self.root), newest)
+        self.assertEqual(extraction.added_since(newest, self.root), set())
+        self.assertIn(second, extraction.added_since(None, self.root))
+
+    def test_a_missed_pass_is_recovered_by_the_next_one(self):
+        """The self-healing property: a session that merged without a
+        pass is not lost, the next pass simply reaches further back."""
+        missed = self._add_record("01")
+        # no pass here — this is the session that slipped through
+        later = self._add_record("02")
+        scope, watermark = extraction.scope_ids(self.root)
+        self.assertIsNone(watermark)
+        self.assertEqual(scope, {missed, later})
+
+
+class ExtractionGateTests(ExtractionWatermarkTests):
+    """A missed pass is recoverable, but nothing would prompt recovery."""
+
+    def setUp(self):
+        super().setUp()
+        self.base = subprocess.run(
+            ["git", "-C", self.root, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    def test_a_branch_adding_no_records_needs_no_pass(self):
+        self._commit("chore: unrelated", allow_empty=True)
+        self.assertEqual(extraction.check_pass(self.base, self.root), [])
+
+    def test_a_branch_adding_records_without_a_pass_fails(self):
+        self._add_record("01")
+        errors = extraction.check_pass(self.base, self.root)
+        self.assertTrue(any("contains no pref-extract:" in e for e in errors))
+
+    def test_a_branch_closing_with_a_pass_succeeds(self):
+        self._add_record("01")
+        self._commit(f"{extraction.EXTRACTION_PREFIX} 1 record", allow_empty=True)
+        self.assertEqual(extraction.check_pass(self.base, self.root), [])
+
+    def test_a_record_added_after_the_pass_fails(self):
+        """Extraction is the last step; a later record is one it never saw."""
+        self._add_record("01")
+        self._commit(f"{extraction.EXTRACTION_PREFIX} 1 record", allow_empty=True)
+        self._add_record("02")
+        errors = extraction.check_pass(self.base, self.root)
+        self.assertTrue(any("added after the" in e for e in errors))
+
+    def test_the_guard_surfaces_the_failure(self):
+        self._add_record("01")
+        errors, _ = guard.evaluate(
+            commits=[],
+            labels=[],
+            body="",
+            head_preferences="short",
+            preferences_touched=False,
+            config=dict(store_config.DEFAULTS),
+            extraction_errors=extraction.check_pass(self.base, self.root),
+        )
+        self.assertTrue(any("contains no pref-extract:" in e for e in errors))
+
+    def test_the_guard_passes_a_closed_branch(self):
+        self._add_record("01")
+        self._commit(f"{extraction.EXTRACTION_PREFIX} 1 record", allow_empty=True)
+        errors, notes = guard.evaluate(
+            commits=[],
+            labels=[],
+            body="",
+            head_preferences="short",
+            preferences_touched=False,
+            config=dict(store_config.DEFAULTS),
+            extraction_errors=extraction.check_pass(self.base, self.root),
+            extraction_note="extraction pass abc123def closes this PR's 1 record(s)",
+        )
+        self.assertEqual(errors, [])
+        self.assertTrue(any("extraction pass" in note for note in notes))
 
 
 class CommitTypeTests(unittest.TestCase):
@@ -732,17 +893,35 @@ class FixtureStoreTests(unittest.TestCase):
         self._write("store.config.json", json.dumps({"budget_tokens": 4000}))
         self.assertEqual(guards.check_corpus(self.root), [])
 
-    def test_a_dangling_marker_fails_the_corpus_check(self):
-        extraction.write_marker(self.root, "20260715T143205Z-never-recorded")
-        errors = guards.check_corpus(self.root)
-        self.assertTrue(any("not a record" in e for e in errors))
+    def test_scope_comes_from_the_diff(self):
+        """The batch boundary is git's answer, not a file's."""
+        subprocess.run(["git", "-C", self.root, "init", "-q"], check=True)
+        for args in (
+            ("config", "user.email", "t@e.st"),
+            ("config", "user.name", "test"),
+            ("add", "-A"),
+            ("commit", "-qm", "chore: base"),
+        ):
+            subprocess.run(["git", "-C", self.root, *args], check=True)
+        base = subprocess.run(
+            ["git", "-C", self.root, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
 
-    def test_a_valid_marker_passes_and_scopes_the_next_batch(self):
-        extraction.write_marker(self.root, self.records[0]["id"])
-        self.assertEqual(guards.check_corpus(self.root), [])
-        records = replay.load_records(self.root)
-        batch = extraction.build_batch(records, extraction.load_marker(self.root))
-        self.assertEqual(batch["count"], 2)
+        added = make_record("20260799T143209Z-fixture-new", 1)
+        self._write_record(added)
+        subprocess.run(["git", "-C", self.root, "add", "-A"], check=True)
+        subprocess.run(
+            ["git", "-C", self.root, "commit", "-qm", "decision(f): new — a"],
+            check=True,
+        )
+
+        self.assertEqual(extraction.added_since(base, self.root), {added["id"]})
+        batch = extraction.build_batch(replay.load_records(self.root), {added["id"]})
+        self.assertEqual(batch["count"], 1)
+        self.assertEqual(batch["history_count"], 3)
 
     def test_replay_builds_cases_from_the_fixture_corpus(self):
         cases = replay.build_cases(replay.load_records(self.root), 20)

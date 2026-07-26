@@ -5,7 +5,18 @@ subtemplate — change it there, pull via `copier update`.
 
 Sits on top of the record guard (`.github/guards/guards.py`), which
 keeps enforcing append-only `decisions/`, the schema, and the token
-budget. This layer adds the three rules the compaction flow needs:
+budget. This layer adds the PR-level rules the preference-set
+lifecycle needs.
+
+0. **Extraction pass.** A PR that ADDS decision records must contain a
+   `pref-extract:` commit, with no record added after it. The watermark
+   for extraction is that commit's position in history, so the check is
+   purely positional — nothing to enumerate, nothing to keep in sync
+   with the diff, nothing copyable from another branch. A pass that
+   found nothing still commits; omitting it is the one thing that
+   fails.
+
+Then the three rules the compaction flow needs:
 
 1. **Carve-out label.** Editing an EXISTING line in `preferences.md`
    requires the carve-out label on the PR. Pure additions never need
@@ -50,6 +61,7 @@ sys.path.insert(
 
 import budget as store_budget  # noqa: E402  (path bootstrap above)
 import config as store_config  # noqa: E402  (path bootstrap above)
+import extraction  # noqa: E402  (path bootstrap above)
 import guards  # noqa: E402  (path bootstrap above; vendored, read-only)
 import replay  # noqa: E402  (path bootstrap above)
 
@@ -174,11 +186,22 @@ def evaluate(
     head_preferences: str,
     preferences_touched: bool,
     config: dict,
+    extraction_errors: list[str] | None = None,
+    extraction_note: str | None = None,
 ) -> tuple[list[str], list[str]]:
     """Pure core: return ``(errors, notes)`` for one PR."""
     errors: list[str] = []
     carve_out_required, notes = classify_pref_commits(commits)
     label = config["carve_out_label"]
+
+    # A missed pass is recoverable — the watermark walk reaches back
+    # past it — but recoverable is not the same as caught: nothing would
+    # prompt the recovery. The gate is what turns "can be picked up
+    # later" into "was picked up here".
+    extraction_errors = list(extraction_errors or [])
+    errors.extend(extraction_errors)
+    if extraction_note and not extraction_errors:
+        notes.append(extraction_note)
 
     if carve_out_required:
         if label not in labels:
@@ -244,6 +267,20 @@ def collect_commits(base: str) -> list[dict]:
     return commits
 
 
+def _extraction_note(base: str, root: str) -> str | None:
+    """Human-facing summary of the pass this PR carries, if any."""
+    added = extraction.added_since(base, root, three_dot=True)
+    if not added:
+        return None
+    sha = extraction.last_extraction_commit(f"{base}..HEAD", root)
+    if sha is None:
+        return None
+    return (
+        f"extraction pass {sha[:9]} closes this PR's {len(added)} added "
+        "record(s); the watermark moves with it"
+    )
+
+
 def preferences_touched(base: str) -> bool:
     changed = _git("diff", "--name-only", f"{base}...HEAD").split("\n")
     return PREFERENCES_FILENAME in [name.strip() for name in changed]
@@ -275,6 +312,8 @@ def main(argv: list[str] | None = None) -> int:
         head_preferences=store_budget.read_preferences(args.root),
         preferences_touched=preferences_touched(args.base),
         config=config,
+        extraction_errors=extraction.check_pass(args.base, args.root),
+        extraction_note=_extraction_note(args.base, args.root),
     )
     for note in notes:
         print(f"note: {note}")

@@ -212,13 +212,23 @@ compaction gate cannot measure a rule set no record was scored
 against.
 
 - **Extraction** (`.agents/skills/extract-preferences/`, driven by
-  `.github/store/extraction.py`) reads every record since
-  `extraction-marker.json` and, per pattern, does exactly one of:
-  bump a counter, flag drift, or propose a rule. It never writes to
-  `decisions/`. The marker is a record ID, not a commit SHA: IDs sort
-  chronologically and the corpus is append-only, so "which records are
-  new" is answerable from `decisions/` alone. CI checks the marker
-  names a record that exists.
+  `.github/store/extraction.py`) runs on the PR that ingests a
+  session and, per pattern, does exactly one of: bump a counter, flag
+  drift, or propose a rule. It never writes to `decisions/`.
+  **The watermark is a `pref-extract:` commit**, so the scope is
+  everything recorded since the last one — derived from history, never
+  tracked beside it. Nothing to advance or keep in sync, nothing to
+  conflict when two branches run a pass at once; a session that merged
+  without a pass is picked up by the next one rather than lost; and the
+  first pass on a corpus needs no special mode, because no
+  `pref-extract:` commit means the whole corpus is in scope.
+  An empty pass commits too (`--allow-empty`) — see § Commit types.
+  Scope and evidence are separate: the pass ACTS on the records since
+  the watermark and REASONS from the whole corpus, because
+  cross-session repetition is the evidence one session cannot see.
+  A PR adding records must contain a `pref-extract:` commit with no
+  record added after it — extraction is the last step of the pass. The
+  check is positional; there is nothing to enumerate.
 - **Budget** (`.github/store/budget.py`) reports usage against
   `budget_tokens` on every push to `main`, keeping one pinned
   "compression due" issue in sync. It reports; it never blocks.
@@ -251,6 +261,7 @@ commit:
 - `pref-confirm: <rule> (n=<count>)` (counter bump)
 - `pref-compact: <summary>` (compaction of the active set)
 - `pref-drift: <summary>` (a rule the records contradict)
+- `pref-extract: <summary>` (an extraction pass — the watermark)
 - `chore: ...` (structure, CI, docs)
 
 Three of these may REMOVE lines from `preferences.md`:
@@ -268,6 +279,12 @@ not the commit subject.
 `preferences.md`: a rule the records contradict is conditionalized or
 retired by a human, never silently overwritten.
 
+`pref-extract` closes an extraction pass and is usually EMPTY
+(`--allow-empty`). Its position in history is the extraction
+watermark, so it is committed even when the pass found nothing — a
+watermark that only moved on findings would stall every time
+extraction legitimately had nothing to say.
+
 Examples:
 
 ```text
@@ -277,6 +294,7 @@ pref-proposal: prefers CI-enforced integrity over access restrictions
 pref-confirm: rejects new infrastructure dependencies (n=4)
 pref-compact: compact active set — 7 rules -> 4 (~1.8k -> ~1.1k tokens)
 pref-drift: infrastructure rule mispredicts solution shape (3 records)
+pref-extract: 4 records — 1 proposal, 1 unexplained
 ```
 
 ## PR flow
@@ -310,8 +328,9 @@ Stdlib-only, no dependencies; fails soft on factory loss. Checks:
   without it showing.
 - Dangling-reference check on `related`/`supersedes`/`drill_down_of`.
 - Token budget on `preferences.md`, against `budget_tokens`.
-- The extraction marker names a record that exists.
 - Commit lint (the types above).
+- A PR adding records contains a `pref-extract:` commit, with no
+  record added after it.
 
 `.github/store/` — vendored from the same subtemplate — adds the
 preference-set lifecycle on top: the carve-out label, the replay gate,

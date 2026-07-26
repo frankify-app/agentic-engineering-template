@@ -47,7 +47,7 @@ authoritative contract.
 - Commit types are this repo's own and are CI-linted — see
   [docs/conventions.md](docs/conventions.md) (`decision(...)`,
   `pref-proposal`, `pref-promote`, `pref-confirm`, `pref-compact`,
-  `pref-drift`, `chore`).
+  `pref-drift`, `pref-extract`, `chore`).
 - In managed environments (e.g. Claude Code on the Web), ALWAYS use
   the tooling the environment itself declares for forge operations
   (PR creation etc.) — `gh`/`curl` are typically sabotaged there. The
@@ -61,11 +61,13 @@ skills manage it. **Run them in this order** — there is nothing to
 compact until rules have been extracted, and the compaction gate
 cannot measure a rule set no record was ever scored against.
 
-1. **`/extract-preferences`** — reads every record after
-   `extraction-marker.json` and, per pattern, does exactly one of:
-   bump a counter, flag drift against a rule the records contradict,
-   or propose a new rule. Reads `decisions/`, never writes there. The
-   marker advances in the PR's final commit.
+1. **`/extract-preferences`** — runs on the PR that ingests a session.
+   Per pattern it does exactly one of: bump a counter, flag drift
+   against a rule the records contradict, or propose a new rule. Reads
+   `decisions/`, never writes there. The pass ends with a
+   `pref-extract:` commit whose position is the watermark, so a PR
+   adding records must carry one with no record added after it. An
+   empty pass commits too.
 2. **`/compact-preferences`** — merges, drops and tightens, then
    replays the last decisions under the old and new sets and gates on
    the preference-driven hit rate. Needs the carve-out label and a
@@ -75,7 +77,7 @@ Status, any time:
 
 ```bash
 python .github/store/budget.py              # tokens, percent, level
-python .github/store/extraction.py status   # records awaiting extraction
+python .github/store/extraction.py status   # records since the last pass
 ```
 
 The budget workflow opens a pinned "compression due" issue on its own

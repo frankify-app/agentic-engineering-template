@@ -1,6 +1,6 @@
 ---
 name: extract-preferences
-description: Extract candidate preference rules from decision records — confirm rules the records support, flag rules they contradict, propose rules for patterns no rule covers — then open one PR with the marker advanced. Use when records have accumulated since the last extraction pass, when the user asks to extract preferences or mine decisions for rules, or before compacting a preference set that has never been extracted into.
+description: Extract candidate preference rules from the decision records recorded since the last extraction pass — confirm rules the records support, flag rules they contradict, propose rules for patterns no rule covers — and close with a pref-extract commit. Use when ingesting a decision session, when the user asks to extract preferences or mine decisions for rules, or before compacting a preference set that has never been extracted into.
 ---
 
 # Extracting preference rules from decision records
@@ -23,7 +23,36 @@ that no record was ever scored against.
 If a store has never been extracted into,
 run this before reaching for `compact-preferences`.
 
-Manual trigger only. A human merges the result.
+**The watermark is a commit.** Every pass ends with a `pref-extract:`
+commit, so the scope is everything recorded since the last one —
+derived from history rather than tracked beside it. Nothing to advance,
+nothing to keep in sync, nothing to conflict when two branches run a
+pass at once.
+
+Two things follow, and both matter to you while running this:
+
+- **A missed pass is not lost.** If a session merged without one, the
+  watermark is simply older and this pass picks those records up too.
+  Read the scope before assuming it is only your session's.
+- **The first pass on a corpus needs no special mode.** No
+  `pref-extract:` commit anywhere means the watermark is the beginning
+  of the corpus, so everything is in scope by construction.
+
+**An empty pass still commits.** A pass that finds nothing produces no
+proposal and no counter bump, so if the watermark keyed on those it
+would stall every time extraction legitimately had nothing to say.
+"Extraction ran and found nothing" is information, and the commit is
+where it goes.
+
+Scope and evidence are different things:
+
+- **Scope** — what you must act on — is the records since the
+  watermark.
+- **Evidence** — what you may reason from — is the whole corpus. The
+  batch ships `history` alongside the scope for exactly this reason. A
+  pattern is not new because this session is the first to show it.
+
+A human merges the result.
 
 ## Invariants
 
@@ -38,37 +67,35 @@ Break any of these and CI rejects the PR, as it should.
   `pref-confirm` counter bumps.
 - **One outcome per pattern.** Confirm, flag drift, or propose. Never
   two, never a silent overwrite of a rule the records contradict.
-- **The marker moves once, at the end.** Advancing it mid-pass loses
-  the batch if the pass is abandoned.
+- **The pass commit comes last.** A PR that adds records must contain
+  a `pref-extract:` commit with no record added after it — a record
+  landing later is one the pass never saw. CI checks both, positionally:
+  there is nothing to enumerate and nothing that could be copied from
+  another branch.
 
 ## Procedure
 
-Run from the repo root, on a clean tree, with `main` up to date.
+Run from the repo root, on the session branch whose records you are
+ingesting — this is a step in that PR, not a separate branch. Fetch
+`main` first so the watermark walk sees every pass that has landed.
 
-### 1. Size the batch
+### 1. Size and build the batch
 
 ```bash
 python .github/store/extraction.py status
-```
-
-Nothing since the marker means nothing to do. Stop.
-
-### 2. Branch
-
-```bash
-git switch -c "extraction/$(date -u +%Y%m%dT%H%M%SZ)" origin/main
-```
-
-Not a `session/` branch: no decisions are being recorded.
-
-### 3. Build the batch
-
-```bash
 python .github/store/extraction.py batch --out /tmp/batch.json
 ```
 
-The batch holds every record after the marker, sorted into four queues.
-Work them in order — the order is the evidence ranking:
+`scope` is everything recorded since the watermark; `history` is what
+earlier passes already covered, shipped as evidence. `watermark` in the
+batch names the commit it walked back to, or `null` on a corpus no pass
+has touched yet.
+
+If the scope is larger than your own session, an earlier one merged
+without a pass. That is the design working — cover them all.
+
+The scope records are sorted into four queues. Work them in order —
+the order is the evidence ranking:
 
 1. **`corrections`** — a `"N, but actually because…"` ruling. The
    decider stated their own reason where the model had guessed wrong,
@@ -86,19 +113,21 @@ Work them in order — the order is the evidence ranking:
 4. **`confirmations`** — clean hits. Cheap counter bumps, and the
    evidence that a rule is earning its tokens.
 
-### 4. Find the patterns
+### 2. Find the patterns
 
-Read across the whole batch before writing anything. A single record
-cannot distinguish a principle from a one-off; **cross-session
-repetition is the evidence**, and it is the only evidence a per-session
-pass could never see. Two records from the same session agreeing is one
-data point, not two.
+Read `history` before writing anything. A single record cannot
+distinguish a principle from a one-off, and two records from the same
+session agreeing is one data point, not two — **cross-session
+repetition is the evidence**. Scoping the pass to this PR does not
+narrow what you may reason from; it narrows what you must act on. A
+pattern that appears once here and twice in `history` is a three-record
+pattern.
 
-Compare each candidate pattern against the current `preferences.md` and
-everything already sitting in `proposals/` — a rule proposed last pass
-and not yet promoted is not a new discovery.
+Compare each candidate against the current `preferences.md` and
+everything already sitting in `proposals/` — a rule proposed on an
+earlier branch and not yet promoted is not a new discovery.
 
-### 5. Classify — exactly one outcome each
+### 3. Classify — exactly one outcome each
 
 **a) Matches an existing rule → confirm.**
 
@@ -143,23 +172,25 @@ A rule that cannot be wrong is worth less than the tokens it costs. If
 you cannot state what would falsify it, it is an observation, not a
 rule.
 
-### 6. Advance the marker
+### 4. Close the pass
 
-The final commit of the PR, and only once the rest of the pass is
-committed:
+The last commit of the PR, after every proposal, drift flag and counter
+bump has landed:
 
 ```bash
-python .github/store/extraction.py mark --record-id "$(python -c 'import json;print(json.load(open("/tmp/batch.json"))["next_marker"])')"
-git add extraction-marker.json
-git commit -m "chore: extraction marker -> <id>"
+git commit --allow-empty -m "pref-extract: 4 records — 1 proposal, 1 unexplained"
 ```
 
-The marker never moves backwards and must name a record that exists —
-CI checks both.
+`--allow-empty` because a pass that found nothing has nothing else to
+commit, and that pass must still move the watermark. Put the detail in
+the body — records covered, what was found, what was left unexplained.
+Nothing parses it; it is there for whoever reads the log.
 
-### 7. Open the PR
+This commit is the watermark. It must come **after** every record in
+the PR, because extraction is the last step of the pass — CI fails a
+record added after it.
 
-Draft PR, carrying:
+### 5. Write the rest of the PR description
 
 - what was found, per queue, with counts;
 - every proposal and drift flag, and the records behind each;

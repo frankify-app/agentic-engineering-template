@@ -17,8 +17,7 @@ Checks, per PR (run with --base <base-sha> from a full checkout):
 4. Token budget on preferences.md, against the repo-local budget.
 5. Commit lint: every PR commit subject uses one of the repo's own
    types (decision/pref-proposal/pref-promote/pref-confirm/
-   pref-compact/pref-drift/chore).
-6. Extraction marker: names a record that exists in the corpus.
+   pref-compact/pref-drift/pref-extract/chore).
 """
 
 from __future__ import annotations
@@ -38,7 +37,6 @@ sys.path.insert(
 
 import config as store_config  # noqa: E402  (path bootstrap above)
 import decision_validator  # noqa: E402  (path bootstrap above)
-import extraction  # noqa: E402  (path bootstrap above)
 
 # Match-side of the repo's own commit types. Grammar authority:
 # docs/conventions.md (§ Commit types, vendored with this file); the
@@ -50,6 +48,7 @@ COMMIT_SUBJECT_RES = (
     re.compile(r"^pref-confirm: .+ \(n=\d+\)$"),
     re.compile(r"^pref-compact: .+$"),
     re.compile(r"^pref-drift: .+$"),
+    re.compile(r"^pref-extract: .+$"),
     re.compile(r"^chore(\([\w-]+\))?: .+$"),
 )
 
@@ -73,7 +72,7 @@ def check_commit_subject(subject: str) -> str | None:
         f"commit subject {subject!r} matches none of the repo's types: "
         "decision(<project>): <slug> — <chosen> | pref-proposal: | "
         "pref-promote: | pref-confirm: ... (n=N) | pref-compact: | "
-        "pref-drift: | chore:"
+        "pref-drift: | pref-extract: | chore:"
     )
 
 
@@ -172,7 +171,7 @@ def check_commits(base: str) -> list[str]:
 
 
 def check_corpus(root: str = ".") -> list[str]:
-    """Validate the ENTIRE decisions/ corpus + refs + budget + marker.
+    """Validate the ENTIRE decisions/ corpus + refs + token budget.
 
     The token budget comes from the repo-local `store.config.json`
     (`budget_tokens`), not from a constant in this file: the budget is
@@ -217,7 +216,6 @@ def check_corpus(root: str = ".") -> list[str]:
                     handle.read(), int(config["budget_tokens"])
                 )
             )
-    errors.extend(extraction.check_marker(root, set(records)))
     return errors
 
 

@@ -26,8 +26,6 @@ protecting the data's integrity.
 │                           # injected into agent context
 ├── store.config.json       # store-owned knobs: token budget, labels,
 │                           # replay window, small-n threshold
-├── extraction-marker.json  # store-owned: last record an extraction
-│                           # pass covered
 ├── proposals/              # agent-proposed preference rules awaiting
 │                           # human promotion (merge != promotion)
 ├── decisions/              # full history, append-only, flat —
@@ -77,9 +75,15 @@ measure a rule set no record was ever scored against.
 
 | | What it does | Driven by |
 | --- | --- | --- |
-| **Extract** (`/extract-preferences`) | Reads every record since `extraction-marker.json` and, per pattern, bumps a counter, flags drift, or proposes a rule. Never writes to `decisions/`. | `.github/store/extraction.py` |
+| **Extract** (`/extract-preferences`) | Runs on the PR ingesting a session: per pattern, bumps a counter, flags drift, or proposes a rule. Acts on the records since the last `pref-extract:` commit, reasons from the whole corpus. Never writes to `decisions/`. | `.github/store/extraction.py` |
 | **Budget** (automatic) | Token-counts `preferences.md` on every push to `main` and keeps one pinned "compression due" issue in sync. Reports, never blocks. | `.github/store/budget.py` |
 | **Compact** (`/compact-preferences`) | Merges overlapping rules, drops dead ones, tightens wording — then replays the last decisions under the old and new sets and gates on the preference-driven hit rate. | `.github/store/replay.py` |
+
+A PR that ADDS decision records must contain a `pref-extract:` commit,
+with no record added after it. That commit's position in history is the
+extraction watermark — there is no watermark file — so a session that
+merged without a pass is picked up by the next pass rather than lost. A
+pass that found nothing commits anyway, empty.
 
 A PR rewriting existing lines in `preferences.md` needs the carve-out
 label and a passing replay report in its description; the PR gate
@@ -93,8 +97,8 @@ a green check that means nothing.
 Check the current state at any time:
 
 ```bash
-python .github/store/budget.py        # tokens, percent, level
-python .github/store/extraction.py status   # records awaiting extraction
+python .github/store/budget.py              # tokens, percent, level
+python .github/store/extraction.py status   # records since the last pass
 ```
 
 The knobs are `store.config.json` — store-owned, seeded once, never

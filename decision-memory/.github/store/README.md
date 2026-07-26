@@ -65,10 +65,6 @@ Token counting is not reimplemented here either — `estimate_tokens`
 from the vendored validator is the single authority, so this layer and
 the vendored guard can never disagree about how big the file is.
 
-`extraction-marker.json` is store-owned for the same reason: it is
-per-store state, and `copier update` clobbering it would silently
-re-run extraction over a batch already processed.
-
 ## Enforcement
 
 **On push to `main`** (`preferences-budget.yml`) the file is counted
@@ -93,10 +89,13 @@ it never blocks.
   `replay_waiver_label` on the PR. A report gated `fail` never merges;
   the waiver does not apply to a measured regression.
 
-The vendored record guard additionally checks that
-`extraction-marker.json` names a record that exists — a marker
-pointing at nothing would silently skip or re-process a whole batch,
-and that failure is indistinguishable from "extraction found nothing".
+- A PR that ADDS decision records must contain a `pref-extract:`
+  commit, with no record added after it. Positional, so there is
+  nothing to enumerate and nothing copyable from another branch. A
+  missed pass is recoverable — the watermark walk reaches past it — but
+  recoverable is not the same as caught, since nothing would prompt the
+  recovery. The gate is what turns "can be picked up later" into "was
+  picked up here".
 
 `decisions/` gets **no carve-out**. Append-only there is absolute and
 neither this layer nor extraction touches that rule.
@@ -167,10 +166,9 @@ what extraction produces. Re-run the null test then.
 ```bash
 python .github/store/extraction.py status
 python .github/store/extraction.py batch --out batch.json
-python .github/store/extraction.py mark --record-id <id>
 ```
 
-`batch` emits every record after the marker, sorted into four queues in
+`batch` emits the records since the watermark, sorted into four queues in
 descending evidence order — `corrections`, `misses`, `refinements`,
 `confirmations` — plus the rule-driven acceptances, where a rule cited
 itself into the prediction slot and that slot was chosen. Those confirm
@@ -178,14 +176,46 @@ nothing: the recommendation caused the choice it would be credited with
 predicting. They are flagged precisely because counting them is
 tempting.
 
-The pass is a BATCH, never per-session: the evidence extraction looks
-for is cross-session repetition, which no single session can see.
+### The watermark is a commit
 
-The marker is a record ID, not a commit SHA. IDs begin with a UTC
-timestamp and `decisions/` is append-only, so "which records are new"
-is a string comparison over the corpus — no git archaeology, nothing
-to break when history is rewritten around it, and a guard check that
-can actually verify the marker points at something real.
+Every pass ends with a `pref-extract:` commit, so the scope is
+everything recorded since the last one. Derived from history rather
+than tracked beside it: nothing to advance, nothing to keep in sync,
+nothing to conflict when two branches run a pass at once — and
+`record.py submit` already works this way for the `pref-confirm` half
+of the same pass.
+
+Two properties fall out of deriving rather than storing:
+
+- **It self-heals.** A session merged without a pass is not lost; the
+  next pass simply reaches further back. A stored watermark that was
+  never advanced looks identical to one with nothing to do.
+- **Bootstrap is not a special case.** No `pref-extract:` commit
+  anywhere means the watermark is the beginning of the corpus, so the
+  first pass covers everything by construction. There is no `--all`
+  mode because there is nothing for it to do.
+
+**An empty pass commits too**, and that is what makes detection
+reliable rather than merely convenient. A pass that finds nothing
+produces no proposal and no counter bump, so a watermark keyed on
+outcome commits would stall every time extraction legitimately had
+nothing to say. `pref-confirm:` is worse than useless for the purpose:
+`submit` emits those, so it would move the watermark for a pass that
+never ran — and a false watermark skips records rather than re-reading
+them. Hence a dedicated type that nothing else produces.
+
+One thing this leans on: **the repo must not squash-merge.** Squashing
+rewrites subjects, and the watermark is a subject in history. Merge
+commits or rebase both preserve it.
+
+### Scope is not evidence
+
+Running the pass per session does NOT make it per-session in the sense
+that matters. The pass ACTS on the records since the watermark and
+REASONS from the whole corpus, which the batch ships as `history`.
+Cross-session repetition is the evidence a single session cannot see,
+and it stays available: a pattern appearing once in the scope and twice
+in history is a three-record pattern.
 
 ## Tests
 
