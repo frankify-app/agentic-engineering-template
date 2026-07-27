@@ -141,79 +141,51 @@ and belongs in a grilling session, not here.
 
 ## The pre-merge link pass
 
-Run this on **every** record-adding PR, drafts or not, immediately
-before merge. A session that recorded natively through the recorder
-never had drafts and so never ran the sections above — this pass is the
-part that still applies to it.
+Run on **every** record-adding PR, immediately before merge. A session
+that recorded natively never had drafts and starts here.
 
-**Why immediately before merge.** At record time the corpus is whatever
-`main` was then; other PRs land in between. Merge is the last moment
-the corpus is complete AND the branch is still mutable. Records are not
-immutable until merge — merging is the acceptance, and
-`docs/conventions.md` § PR flow already sanctions hand-editing the
-branch before it.
+Rebase first, or the gate checks against a corpus missing everything
+merged since the branch was cut.
 
 ```bash
 git rebase origin/main
 python .github/store/similarity.py --out /tmp/gate.json
 ```
 
-Rebase first, or the gate checks against a corpus missing everything
-merged since the branch was cut.
+Amending a record already committed on this branch is fine — the
+append-only guard diffs `base...HEAD`, so a record added and later
+amended in one PR still reads as an addition.
 
-### What you can do here, and what you cannot
-
-The remedy set is narrower than for drafts. The records exist as
-commits, so there is no `discarded-drafts.json` to move anything into.
+### Remedies
 
 | Remedy | Available |
 | --- | --- |
-| Add a link | yes — the point of this pass |
+| Add a link | yes |
 | Drop the record | only by dropping its commit |
-| Discard to `discarded-drafts.json` | no — that is a drafts-only remedy |
-| Edit the record on the other side | **never** — it is merged and immutable |
+| Discard to `discarded-drafts.json` | no — drafts only |
+| Edit the record on the other side | never — merged and immutable |
 
-Amending a record already committed on this branch is fine: the
-append-only guard diffs `base...HEAD`, so a record added and later
-amended within one PR still reads as an addition.
+### Links point backwards only
 
-### Links only ever point backwards
+A link target must already exist in `decisions/`; the validator rejects
+a dangling ref. Two open PRs therefore cannot reference each other:
+**the edge is written by whichever merges second**, and the first never
+gains the reverse edge.
 
-A link target must already exist in `decisions/` — the validator
-rejects a dangling ref, and correctly, since a record must not point at
-something that may never merge.
+Run the pass on every PR and the second one always catches the pair.
 
-So two PRs open at once cannot reference each other. **The edge is
-written by whichever merges second**, pointing back at the first, and
-the first can never gain the reverse edge once it is merged.
+### Judging
 
-That is why this pass has to run on every PR rather than only on ones
-that looked interesting at record time: applied uniformly, the
-second-merging PR always catches the pair, and nothing has to see
-across open PRs at all.
-
-### Judging what surfaces
-
-Most pairs will be noise. Containment on a short record fires easily —
-most of a five-token record is contained in anything sharing two of its
-words — so read the questions, not the score.
-
-The judgement is different from the drafts case. There, the question is
-*"are these one ruling?"* Here both records are staying, so the
-question is only *"does an edge belong between them, and which way?"*
+Read the questions, not the score — containment fires easily on short
+records.
 
 - **`related`** — two rulings that inform each other.
-- **`supersedes`** — the later one replaces the earlier. Only when it
-  genuinely overrides; a later ruling that refined or re-confirmed the
-  same answer is `related`.
-- **nothing** — same subject, independent rulings. A legitimate
-  outcome; record that you looked.
+- **`supersedes`** — the later genuinely overrides. A later ruling that
+  refined or re-confirmed the same answer is `related`.
+- **nothing** — independent. A legitimate outcome; say you looked.
 
-Two records sharing a slug are worth reading closely and are **not**
-thereby duplicates. Slugs follow the topic, so two rulings on one topic
-collide naturally — the deliberation tells you which it is: option
-count, rejection depth, and whether the outcome was a plain hit or a
-refinement.
+A shared slug is not a duplicate. Slugs follow the topic, so two
+rulings on one topic collide. Tell them apart by option count,
+rejection depth, and whether the outcome was a hit or a refinement.
 
-Commit the links as `chore:` — they are not new decisions, and no other
-commit type fits.
+Commit links as `chore:`.
