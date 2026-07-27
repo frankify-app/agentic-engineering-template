@@ -1,9 +1,9 @@
 ---
 name: adjudicate-drafts
-description: Resolve the ingestion gate's flagged draft clusters before ingestion. Use when drafts are flagged duplicate, re-decision or uncertain, or before ingesting a drafts batch.
+description: Resolve the ingestion gate's flagged clusters — in drafts before ingestion, in a branch's records before merge. Use when drafts are flagged duplicate/re-decision/uncertain, or before merging any PR that adds decision records.
 ---
 
-# Adjudicating flagged drafts before ingestion
+# Adjudicating flagged records
 
 > Copier-vendored from the agentic-engineering-template decision-memory
 > subtemplate — do NOT edit it in the store repo;
@@ -11,6 +11,14 @@ description: Resolve the ingestion gate's flagged draft clusters before ingestio
 
 The gate finds clusters and does not resolve them. This skill turns
 each cluster into a decision the human answers in one pass.
+
+Two moments, and every record-adding PR hits at least the second:
+
+1. **Drafts, before ingestion** — sections 1-5. The full remedy set is
+   available because nothing is written yet.
+2. **A branch's records, before merge** — the pre-merge link pass at
+   the end. A session that recorded natively through the recorder
+   never had drafts and starts there.
 
 `decisions/` is append-only with no carve-out: after ingestion a
 duplicate cannot be withdrawn and a missing link cannot be added.
@@ -124,9 +132,88 @@ Then, while the drafts are still mutable:
 
 ## Afterwards
 
-Ingest through the recorder. The records are immutable from that
-moment.
+Ingest through the recorder, then run the pre-merge link pass below
+before the PR merges.
 
 A ruling worth remembering from this pass — a policy on when two
 extractions count as one decision, say — is a decision like any other
 and belongs in a grilling session, not here.
+
+## The pre-merge link pass
+
+Run this on **every** record-adding PR, drafts or not, immediately
+before merge. A session that recorded natively through the recorder
+never had drafts and so never ran the sections above — this pass is the
+part that still applies to it.
+
+**Why immediately before merge.** At record time the corpus is whatever
+`main` was then; other PRs land in between. Merge is the last moment
+the corpus is complete AND the branch is still mutable. Records are not
+immutable until merge — merging is the acceptance, and
+`docs/conventions.md` § PR flow already sanctions hand-editing the
+branch before it.
+
+```bash
+git rebase origin/main
+python .github/store/similarity.py --out /tmp/gate.json
+```
+
+Rebase first, or the gate checks against a corpus missing everything
+merged since the branch was cut.
+
+### What you can do here, and what you cannot
+
+The remedy set is narrower than for drafts. The records exist as
+commits, so there is no `discarded-drafts.json` to move anything into.
+
+| Remedy | Available |
+| --- | --- |
+| Add a link | yes — the point of this pass |
+| Drop the record | only by dropping its commit |
+| Discard to `discarded-drafts.json` | no — that is a drafts-only remedy |
+| Edit the record on the other side | **never** — it is merged and immutable |
+
+Amending a record already committed on this branch is fine: the
+append-only guard diffs `base...HEAD`, so a record added and later
+amended within one PR still reads as an addition.
+
+### Links only ever point backwards
+
+A link target must already exist in `decisions/` — the validator
+rejects a dangling ref, and correctly, since a record must not point at
+something that may never merge.
+
+So two PRs open at once cannot reference each other. **The edge is
+written by whichever merges second**, pointing back at the first, and
+the first can never gain the reverse edge once it is merged.
+
+That is why this pass has to run on every PR rather than only on ones
+that looked interesting at record time: applied uniformly, the
+second-merging PR always catches the pair, and nothing has to see
+across open PRs at all.
+
+### Judging what surfaces
+
+Most pairs will be noise. Containment on a short record fires easily —
+most of a five-token record is contained in anything sharing two of its
+words — so read the questions, not the score.
+
+The judgement is different from the drafts case. There, the question is
+*"are these one ruling?"* Here both records are staying, so the
+question is only *"does an edge belong between them, and which way?"*
+
+- **`related`** — two rulings that inform each other.
+- **`supersedes`** — the later one replaces the earlier. Only when it
+  genuinely overrides; a later ruling that refined or re-confirmed the
+  same answer is `related`.
+- **nothing** — same subject, independent rulings. A legitimate
+  outcome; record that you looked.
+
+Two records sharing a slug are worth reading closely and are **not**
+thereby duplicates. Slugs follow the topic, so two rulings on one topic
+collide naturally — the deliberation tells you which it is: option
+count, rejection depth, and whether the outcome was a plain hit or a
+refinement.
+
+Commit the links as `chore:` — they are not new decisions, and no other
+commit type fits.
