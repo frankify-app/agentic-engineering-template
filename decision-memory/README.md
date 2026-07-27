@@ -80,6 +80,11 @@ measure a rule set no record was ever scored against.
 | **Budget** (automatic) | Token-counts `preferences.md` on every push to `main` and keeps one pinned "compression due" issue in sync. Reports, never blocks. | `.github/store/budget.py` |
 | **Compact** (`/compact-preferences`) | Merges overlapping rules, drops dead ones, tightens wording — then replays the last decisions under the old and new sets and gates on the preference-driven hit rate. | `.github/store/replay.py` |
 
+Before any of that, drafts pass the ingestion gate
+(`.github/store/similarity.py`) and `/adjudicate-drafts`: duplicates,
+missing re-decision links, false cold claims and unenriched
+`artifact_ref`s are fixable only while the drafts are still drafts.
+
 A PR that ADDS decision records must contain a `pref-extract:` commit,
 with no record added after it. That commit's position in history is the
 extraction watermark — there is no watermark file — so a session that

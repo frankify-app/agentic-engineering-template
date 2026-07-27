@@ -63,9 +63,14 @@ python .github/store/similarity.py --drafts <drafts.json>
 
 `decisions/` is append-only, so duplicates, missing re-decision links,
 false cold claims and unenriched `artifact_ref`s are all fixable ONLY
-while the drafts are still drafts. The gate reports; you act on the
-drafts before the recorder ingests them. See
-[docs/conventions.md](docs/conventions.md) § Ingestion gate.
+while the drafts are still drafts.
+
+The gate finds clusters and deliberately does not resolve them — every
+resolution trades one loss against another. **`/adjudicate-drafts`**
+turns each cluster into a decision with its implications laid out, so
+the call is one answer rather than an investigation. Then ingest.
+
+See [docs/conventions.md](docs/conventions.md) § Ingestion gate.
 
 ## Preference-set lifecycle
 

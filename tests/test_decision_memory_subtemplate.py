@@ -16,6 +16,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 STORE_FILES = frozenset(
     {
+        ".agents/skills/adjudicate-drafts/SKILL.md",
         ".agents/skills/compact-preferences/SKILL.md",
         ".agents/skills/extract-preferences/SKILL.md",
         ".copier-answers.agentic.yml",

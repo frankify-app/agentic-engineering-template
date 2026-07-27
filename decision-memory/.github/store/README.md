@@ -262,8 +262,23 @@ Chat-extracted drafts carry null provenance by design, so absence is
 never read as "distinct" — it falls back to the session key, then to
 the answer, and lands in `uncertain` rather than guessing.
 
+Pairs also surface by **containment** (overlap coefficient), not only
+by similarity. That is the one case symmetric scoring is structurally
+blind to: a draft re-extracted as TWO. Jaccard divides by the union, so
+a bundle scores low against each half even when the half sits entirely
+inside it — measured on a real split, jaccard 0.34 against the half
+that shares vocabulary versus containment 0.68. It cost one flagged
+pair in 136 on a real corpus, and that pair was a true relation.
+
+Still only a surfacing aid: pairwise comparison cannot ASSERT a split,
+and a half sharing little vocabulary with its bundle (0.17 in the same
+case) stays invisible. Surfacing one half is enough to bring a human to
+the cluster.
+
 **The gate never writes.** Every remedy above is a judgement call; the
 tool's job is to make sure the call gets made while it still can be.
+`/adjudicate-drafts` is the skill that turns each cluster into a
+decision with its costs laid out.
 
 ## Tests
 

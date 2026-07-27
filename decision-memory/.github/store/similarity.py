@@ -62,6 +62,23 @@ VERDICT_ORDER = (DUPLICATE, RE_DECISION, UNCERTAIN, LINKED)
 # an immutable record that can never be withdrawn.
 DEFAULT_THRESHOLD = 0.35
 
+# Asymmetric surfacing channel, for the case symmetric similarity is
+# structurally blind to: one draft re-extracted as TWO. Jaccard divides
+# by the union, so a bundle split in half scores low against each half
+# even when the half is entirely inside the bundle. Containment divides
+# by the smaller side instead and sees it.
+#
+# Measured on a real split: jaccard 0.34 against the half that shares
+# vocabulary, containment 0.68. It cost 1 flagged pair in 136 on a real
+# 17-record corpus, and that pair was a true relation — cheap enough to
+# run alongside rather than instead.
+#
+# Still only a surfacing aid. Pairwise comparison cannot ASSERT a
+# split, and a half sharing little vocabulary with its bundle (0.17 in
+# the same real case) stays invisible. Surfacing one half is enough to
+# bring a human to the cluster.
+CONTAINMENT_THRESHOLD = 0.5
+
 # An artifact_ref agreeing on repo+path is strong corroboration that
 # two records are about the same thing, so it lifts an otherwise
 # borderline text score over the line rather than deciding alone.
@@ -111,6 +128,17 @@ def jaccard(left: set[str], right: set[str]) -> float:
     if not left or not right:
         return 0.0
     return len(left & right) / len(left | right)
+
+
+def containment(left: set[str], right: set[str]) -> float:
+    """Overlap coefficient: how much of the SMALLER side is shared.
+
+    Asymmetric where jaccard is symmetric, which is the whole point —
+    a part fully inside a whole scores 1.0 here and much lower there.
+    """
+    if not left or not right:
+        return 0.0
+    return len(left & right) / min(len(left), len(right))
 
 
 def _ref(record: dict) -> dict:
@@ -317,11 +345,14 @@ def find_pairs(
 
     def consider(left: dict, right: dict, right_side: str) -> None:
         score = similarity(left, right)
-        if score < threshold:
+        overlap = round(containment(record_tokens(left), record_tokens(right)), 4)
+        if score < threshold and overlap < CONTAINMENT_THRESHOLD:
             return
         pairs.append(
             {
                 "score": score,
+                "containment": overlap,
+                "surfaced_by": "similarity" if score >= threshold else "containment",
                 "verdict": classify(left, right),
                 "left": identity(left),
                 "right": identity(right),
@@ -378,24 +409,44 @@ def preferences_at(commit: object, root: str = ".") -> str | None:
     return text or None
 
 
+# The `[confirmed: N, last: DATE]` suffix every rule carries. It is
+# bookkeeping, identical in shape across the whole set, and counting it
+# as rule vocabulary dilutes every coverage score by a fixed amount that
+# grows with how well-confirmed the rule is.
+_RULE_METADATA_RE = re.compile(r"\[[^\]]*\]\s*$")
+
+
 def rule_lines(preferences_text: str) -> list[str]:
     """The rule bullets of a preference set, without the prose around them."""
     return [
-        line.strip()
+        _RULE_METADATA_RE.sub("", line.strip()).strip()
         for line in preferences_text.splitlines()
         if line.strip().startswith("- ")
     ]
 
 
+# Share of a RULE's terms that appear in a record. Not jaccard: rules
+# run ~8 tokens and records ~20-40, and jaccard divides by the union,
+# so the size gap caps the score below any useful threshold. A 7-token
+# rule against a 42-token record maxes out at 0.167 — the check could
+# not fire even on a rule quoted verbatim.
+#
+# Containment is size-invariant and says something a human can act on:
+# "this fraction of the rule's terms is present". Measured on a real
+# corpus the distribution is sparse — one pair at 0.43, then a cliff to
+# 0.12 — so 0.4 sits in the gap rather than on a slope.
+FALSE_COLD_THRESHOLD = 0.4
+
+
 def false_cold_candidates(
-    record: dict, preferences_text: str, threshold: float = 0.18
+    record: dict, preferences_text: str, threshold: float = FALSE_COLD_THRESHOLD
 ) -> list[dict]:
     """Rules that plausibly applied to a record claiming `cold`.
 
     Advisory by construction. Conventions call a false cold claim a
-    detectable provenance defect, and this is the detection — but a
-    token overlap cannot know whether a rule actually drove anything,
-    so a human confirms before restreaming the draft.
+    detectable provenance defect, and this is the detection — but term
+    overlap cannot know whether a rule actually drove anything, so a
+    human confirms before restreaming the draft.
     """
     if record.get("prediction_stream") != "cold":
         return []
@@ -403,17 +454,19 @@ def false_cold_candidates(
     matches = []
     for line in rule_lines(preferences_text):
         rule_tokens = tokenize(line)
+        if not rule_tokens:
+            continue
         overlap = tokens & rule_tokens
-        score = jaccard(tokens, rule_tokens)
+        score = len(overlap) / len(rule_tokens)
         if score >= threshold:
             matches.append(
                 {
                     "rule": line,
-                    "overlap_score": round(score, 4),
+                    "rule_coverage": round(score, 4),
                     "shared_terms": sorted(overlap),
                 }
             )
-    matches.sort(key=lambda match: -match["overlap_score"])
+    matches.sort(key=lambda match: -match["rule_coverage"])
     return matches
 
 
@@ -513,8 +566,13 @@ def render(report: dict) -> str:
     for pair in report["pairs"]:
         lines.append("")
         corroborated = " +artifact" if pair["artifact_corroborated"] else ""
+        via = (
+            f" containment {pair['containment']}"
+            if pair["surfaced_by"] == "containment"
+            else ""
+        )
         lines.append(
-            f"  [{pair['verdict']}] {pair['score']}{corroborated}  "
+            f"  [{pair['verdict']}] {pair['score']}{corroborated}{via}  "
             f"{pair['left']}  vs  {pair['right']} ({pair['right_side']})"
         )
         for field, (left, right) in sorted(pair["diffs"].items()):
@@ -529,7 +587,7 @@ def render(report: dict) -> str:
             )
             for match in entry["matches"]:
                 lines.append(
-                    f"      {match['overlap_score']}  {match['rule']}\n"
+                    f"      {match['rule_coverage']}  {match['rule']}\n"
                     f"          shared: {', '.join(match['shared_terms'])}"
                 )
     else:

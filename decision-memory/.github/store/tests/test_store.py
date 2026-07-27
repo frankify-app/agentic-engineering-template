@@ -1013,6 +1013,30 @@ class SimilarityGateTests(unittest.TestCase):
         self.assertTrue(matches)
         self.assertIn("infrastructure", matches[0]["shared_terms"])
 
+    def test_false_cold_survives_a_long_record(self):
+        """The measure must not be size-biased.
+
+        Rules run ~8 tokens and records 20-40, so dividing by the union
+        capped the score below any useful threshold — a 7-token rule
+        against a 42-token record maxed out at 0.167 and could not fire
+        on a rule quoted verbatim.
+        """
+        preferences = (
+            "- Rejects new infrastructure dependencies unless they remove an "
+            "entire class of maintenance. [confirmed: 3, last: 2026-07-15]\n"
+        )
+        record = self._draft(
+            "20260715T143205Z-a",
+            "Do we add a new infrastructure dependency, and does it remove an "
+            "entire class of maintenance, given the registry, the release "
+            "machinery, the pinning story, the mirror, the audit trail, the "
+            "rotation schedule and the vendoring alternative?",
+            "no, vendor it instead of taking the dependency",
+            prediction_stream="cold",
+        )
+        self.assertGreater(len(similarity.record_tokens(record)), 20)
+        self.assertTrue(similarity.false_cold_candidates(record, preferences))
+
     def test_a_preference_driven_record_is_never_false_cold(self):
         record = self._draft("20260715T143205Z-a", "infrastructure dependency?", "no")
         record["prediction_stream"] = "preference-driven"

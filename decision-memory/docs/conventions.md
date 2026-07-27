@@ -225,7 +225,11 @@ plus the store first:
   null/partial refs by design and are enriched here, once the commits
   exist. SHAs are never guessed.
 
-The gate reports and never writes. Details in
+The gate reports and never writes; `/adjudicate-drafts` proposes a
+resolution per cluster with what each way costs, and a human decides.
+An undetected duplicate is not merely a wasted file — it double-counts
+as evidence, and cross-record repetition is exactly what extraction
+reads as the signal that a pattern is a principle. Details in
 [.github/store/README.md](../.github/store/README.md).
 
 ## Preference-set lifecycle
