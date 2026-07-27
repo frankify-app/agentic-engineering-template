@@ -85,6 +85,12 @@ Before any of that, drafts pass the ingestion gate
 missing re-decision links, false cold claims and unenriched
 `artifact_ref`s are fixable only while the drafts are still drafts.
 
+The gate's five thresholds live in `store.config.json`, not in the
+vendored module, because the right value is a property of a store's
+own corpus. Each carries its evidence under `calibration`; the gate
+reports any that are unmeasured or that the corpus has outgrown, and
+`/recalibrate-thresholds` re-measures and proposes — never applies.
+
 A PR that ADDS decision records must contain a `pref-extract:` commit,
 with no record added after it. That commit's position in history is the
 extraction watermark — there is no watermark file — so a session that

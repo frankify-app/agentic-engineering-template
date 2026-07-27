@@ -1068,6 +1068,261 @@ class SimilarityGateTests(unittest.TestCase):
         self.assertEqual(report["candidates"], 1)
 
 
+# Token lengths measured on the corpus this gate was calibrated
+# against: 77 real drafts plus 17 ingested records. Fixtures must reach
+# the TOP of this range. Every size-bias defect found so far was
+# invisible for exactly one reason — hand-written fixtures were shorter
+# than reality, so a measure that degraded with length never got the
+# chance to degrade.
+REAL_TOKEN_LENGTHS = {"min": 6, "median": 22, "max": 54}
+
+
+class MeasureInvariantTests(unittest.TestCase):
+    """Properties every scoring measure must hold, at any input size.
+
+    These are katas, in the sense docs/glossary/kata.md gives the word:
+    promoted from real failures, and kept afterwards as protection.
+
+    They are deliberately NOT more example fixtures. The defects they
+    replicate were all invisible to hand-written examples, because the
+    examples were written by whoever held the same misconception as the
+    code. A property checked across the real size range catches what
+    another example of the same shape cannot.
+    """
+
+    RULE = (
+        "Rejects new infrastructure dependencies unless they remove an "
+        "entire class of maintenance"
+    )
+    # Distinct filler tokens, so padding a record adds length without
+    # accidentally adding overlap with the rule.
+    FILLER = (
+        "registry mirror rotation pinning audit vendoring machinery cadence "
+        "quorum ledger beacon satchel lantern harbour thicket parapet "
+        "cobbler tundra zephyr marmot cistern bellows drover kestrel "
+        "pylon gantry furrow bramble sundial oxbow quarry trellis "
+        "wicket flotsam gable ravine spindle tarpaulin vellum wharf "
+        "alcove burlap cinder dovetail ember fathom girder hinterland "
+        "inkwell jetsam kiln lintel"
+    ).split()
+
+    def _record_quoting_the_rule(self, filler_tokens: int) -> dict:
+        """A cold record that quotes the rule verbatim, padded to length."""
+        padding = " ".join(self.FILLER[:filler_tokens])
+        record = make_record("20260715T143205Z-quote", 1, stream="cold")
+        record["question"] = f"{self.RULE}? {padding}"
+        record["options"] = [{"slot": 1, "label": "no"}]
+        return record
+
+    def test_a_verbatim_rule_is_flagged_at_every_real_record_length(self):
+        """KATA: the false-cold measure must not be size-biased.
+
+        Replicates the defect where `false_cold_candidates` used
+        jaccard. Jaccard divides by the union, so a 7-token rule
+        against a 42-token record maxed out at 0.167 against a 0.18
+        threshold — the check could not fire on ANY input, including a
+        record that quoted the rule word for word.
+
+        Asserting one example would not have caught it. Asserting the
+        property across the real length range does.
+        """
+        preferences = f"- {self.RULE}. [confirmed: 3, last: 2026-07-15]\n"
+        for filler in (0, 10, 20, 30, 40):
+            with self.subTest(filler=filler):
+                record = self._record_quoting_the_rule(filler)
+                matches = similarity.false_cold_candidates(record, preferences)
+                self.assertTrue(
+                    matches,
+                    f"a verbatim rule went unflagged in a "
+                    f"{len(similarity.record_tokens(record))}-token record",
+                )
+
+    def test_the_fixtures_reach_the_real_corpus_maximum(self):
+        """KATA: fixtures shorter than reality hide size-dependent bugs.
+
+        The guard on the guard. If the longest record these invariants
+        can build is shorter than the longest real record, the
+        invariant above is checking a range the store has already left
+        behind, and would pass while production silently failed.
+        """
+        longest = self._record_quoting_the_rule(len(self.FILLER))
+        self.assertGreaterEqual(
+            len(similarity.record_tokens(longest)),
+            REAL_TOKEN_LENGTHS["max"],
+            "fixtures no longer span the real corpus — re-measure "
+            "REAL_TOKEN_LENGTHS and lengthen FILLER",
+        )
+
+    def test_a_verbatim_rule_still_scores_full_coverage_when_padded(self):
+        """Coverage is size-invariant; that is the whole reason for it.
+
+        Pinning the property directly, not just its consequence at one
+        threshold: a threshold change must not be able to silently
+        satisfy the test above while the measure regresses.
+        """
+        preferences = f"- {self.RULE}. [confirmed: 3, last: 2026-07-15]\n"
+        scores = set()
+        for filler in (0, 20, 40):
+            record = self._record_quoting_the_rule(filler)
+            matches = similarity.false_cold_candidates(record, preferences)
+            scores.add(matches[0]["rule_coverage"])
+        self.assertEqual(
+            len(scores), 1, f"coverage moved with record length: {sorted(scores)}"
+        )
+
+    def test_every_reported_entity_has_a_name(self):
+        """KATA: drafts are keyed by `slug` and have no `id` yet.
+
+        Replicates the defect where the gate read `id` only and printed
+        `None` for every draft — on data it was built specifically to
+        check, before ingestion mints any id.
+        """
+        drafts = [
+            {
+                "slug": "20260715T143205Z-a",
+                "question": "How do agents reach the store?",
+                "options": [{"slot": 1, "label": "through the recorder"}],
+                "chosen_slot": 1,
+                "chosen": "through the recorder",
+                "prediction_stream": "cold",
+            },
+            {
+                "slug": "20260715T143206Z-b",
+                "question": "How do agents reach the store?",
+                "options": [{"slot": 1, "label": "through the recorder"}],
+                "chosen_slot": 1,
+                "chosen": "through the recorder",
+                "prediction_stream": "cold",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            report = similarity.build_report(drafts, [], tmp)
+        self.assertTrue(report["pairs"], "the two identical drafts should pair")
+        for pair in report["pairs"]:
+            self.assertIsNotNone(pair["left"])
+            self.assertIsNotNone(pair["right"])
+        for entry in report["artifact_ref_tiers"]:
+            self.assertIsNotNone(entry["id"])
+
+
+class CalibrationTests(unittest.TestCase):
+    """Thresholds are claims about a corpus, so they expire."""
+
+    def test_thresholds_are_store_tunable(self):
+        """The whole point of moving them out of the vendored module.
+
+        A store that cannot act on a recalibration without editing
+        vendored code has to choose between a stale threshold and a
+        merge conflict on every `copier update`.
+        """
+        for key in store_config.CALIBRATED:
+            self.assertIn(key, store_config.DEFAULTS)
+
+    def test_a_config_override_actually_reaches_the_measure(self):
+        left = {
+            "slug": "a",
+            "question": "How do agents reach the store?",
+            "options": [{"slot": 1, "label": "recorder"}],
+        }
+        right = {
+            "slug": "b",
+            "question": "How do humans reach the store?",
+            "options": [{"slot": 1, "label": "browser"}],
+        }
+        # Both channels, because the gate surfaces on similarity OR
+        # containment: raising one alone leaves the other free to
+        # surface the pair, which would make this test pass for a
+        # reason that has nothing to do with the override working.
+        loose = similarity.tuning(
+            {"similarity_threshold": 0.01, "containment_threshold": 0.01}
+        )
+        strict = similarity.tuning(
+            {"similarity_threshold": 0.99, "containment_threshold": 0.99}
+        )
+        self.assertTrue(similarity.find_pairs([left, right], [], None, loose))
+        self.assertFalse(similarity.find_pairs([left, right], [], None, strict))
+
+    def test_an_unmeasured_threshold_says_so(self):
+        """Never-measured is not a mild version of outgrown."""
+        stale = store_config.stale_calibrations(dict(store_config.DEFAULTS), 5)
+        self.assertEqual(len(stale), len(store_config.CALIBRATED))
+        self.assertTrue(all(e["reason"] == "never measured" for e in stale))
+
+    def test_a_fresh_stamp_is_not_stale(self):
+        config = dict(store_config.DEFAULTS)
+        config["calibration"] = {
+            name: {"corpus_size": 100, "separation": 0.2, "measured": "2026-07-27"}
+            for name in store_config.CALIBRATED
+        }
+        self.assertEqual(store_config.stale_calibrations(config, 120), [])
+
+    def test_a_stamp_the_corpus_outgrew_is_stale(self):
+        config = dict(store_config.DEFAULTS)
+        config["calibration"] = {
+            name: {"corpus_size": 50, "measured": "2026-07-27"}
+            for name in store_config.CALIBRATED
+        }
+        stale = store_config.stale_calibrations(config, 100)
+        self.assertEqual(len(stale), len(store_config.CALIBRATED))
+        self.assertIn("50 -> 100", stale[0]["reason"])
+
+    def test_the_growth_factor_is_configurable(self):
+        config = dict(store_config.DEFAULTS)
+        config["calibration_growth_factor"] = 10.0
+        config["calibration"] = {
+            name: {"corpus_size": 50} for name in store_config.CALIBRATED
+        }
+        self.assertEqual(store_config.stale_calibrations(config, 100), [])
+
+    def test_a_threshold_outside_zero_to_one_is_rejected(self):
+        config = dict(store_config.DEFAULTS)
+        config["similarity_threshold"] = 1.4
+        errors = store_config.validate_config(config)
+        self.assertTrue(any("similarity_threshold" in e for e in errors))
+
+    def test_a_boolean_is_not_a_threshold(self):
+        config = dict(store_config.DEFAULTS)
+        config["artifact_boost"] = True
+        errors = store_config.validate_config(config)
+        self.assertTrue(any("artifact_boost" in e for e in errors))
+
+    def test_an_unreadable_stamp_is_an_error_not_a_shrug(self):
+        """A stamp that proves nothing while looking like evidence is
+        worse than no stamp at all."""
+        config = dict(store_config.DEFAULTS)
+        config["calibration"] = {"similarity_threshold": {"corpus_size": "lots"}}
+        errors = store_config.validate_config(config)
+        self.assertTrue(any("corpus_size" in e for e in errors))
+
+    def test_a_stamp_for_an_unknown_constant_is_rejected(self):
+        config = dict(store_config.DEFAULTS)
+        config["calibration"] = {"budget_tokens": {"corpus_size": 10}}
+        errors = store_config.validate_config(config)
+        self.assertTrue(any("not a calibrated constant" in e for e in errors))
+
+    def test_the_documented_out_flag_exists(self):
+        """The skills document `--out`; a flag only in prose is a broken
+        command in a file that reads like instructions."""
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "gate.json")
+            self.assertEqual(similarity.main(["--root", tmp, "--out", out]), 0)
+            with open(out, encoding="utf-8") as handle:
+                self.assertIn("pairs", json.load(handle))
+
+    def test_the_gate_report_surfaces_staleness(self):
+        drafts = [
+            {
+                "slug": "20260715T143205Z-a",
+                "question": "q?",
+                "options": [{"slot": 1, "label": "x"}],
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            report = similarity.build_report(drafts, [], tmp)
+        self.assertTrue(report["stale_calibrations"])
+        self.assertIn("recalibrate-thresholds", similarity.render(report))
+
+
 class CommitTypeTests(unittest.TestCase):
     """The commit lint is the grammar half of docs/conventions.md."""
 

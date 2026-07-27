@@ -19,6 +19,7 @@ STORE_FILES = frozenset(
         ".agents/skills/adjudicate-drafts/SKILL.md",
         ".agents/skills/compact-preferences/SKILL.md",
         ".agents/skills/extract-preferences/SKILL.md",
+        ".agents/skills/recalibrate-thresholds/SKILL.md",
         ".copier-answers.agentic.yml",
         ".github/guards/decision_validator.py",
         ".github/guards/guards.py",

@@ -51,9 +51,51 @@ these knobs:
 | `replay_waiver_label` | `preferences-replay-waiver` | label accepting an `insufficient-evidence` gate |
 | `replay_window` | 20 | how many recent decisions the replay scores |
 | `min_gated_cases` | 8 | below this many preference-driven cases the gate reports `insufficient-evidence` |
+| `similarity_threshold` | 0.35 | below this a pair is not worth a human's attention |
+| `containment_threshold` | 0.5 | the split channel: one draft re-extracted as two |
+| `artifact_boost` | 0.15 | how much repo+path agreement lifts a borderline pair |
+| `answer_agreement` | 0.5 | how close two rewordings must be to count as one answer |
+| `false_cold_threshold` | 0.4 | rule coverage that flags a suspect `cold` record |
+| `calibration_growth_factor` | 2.0 | corpus growth past a stamp before it reads as stale |
+| `calibration` | `{}` | evidence behind each calibrated constant |
 
 A missing file is fine — the defaults are the contract. Unknown keys
 are tolerated (`_comment` is one), invalid values fail loudly.
+
+### Policy knobs and calibrated knobs are different things
+
+`budget_tokens`, `warn_at_percent` and `replay_window` are **policy**:
+choices about how much context to spend. No corpus can contradict
+them — a budget is not wrong, it is a decision.
+
+The five in `config.CALIBRATED` are **empirical**: each is a claim
+about where a real distribution separates, and a claim can be false,
+silently, for as long as nobody re-measures. `false_cold_threshold`
+once held a value the measure could not reach at any input, and every
+run duly reported no false colds.
+
+They live in config rather than in `similarity.py` because the right
+value is a property of *a store's corpus*. Two stores with different
+corpora should hold different numbers, and a store must not have to
+edit a vendored module — and take a merge conflict on every
+`copier update` — to act on its own measurement.
+
+Each carries its evidence under `calibration`:
+
+```json
+"calibration": {
+  "false_cold_threshold": {
+    "corpus_size": 94, "separation": 0.18, "measured": "2026-07-27"
+  }
+}
+```
+
+Empty by default, deliberately: a store that has never measured should
+say so rather than inherit a stamp earned on somebody else's corpus.
+The gate reports a constant as **never measured** or **outgrown**, and
+`/recalibrate-thresholds` is the pass that resolves either. It is a
+prompt, never a failing gate — failing CI over a stale threshold would
+only teach people to silence it.
 
 `budget_tokens` is the ONLY budget. The vendored record guard loads
 this config and enforces whatever the store chose;

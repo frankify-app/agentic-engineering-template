@@ -70,6 +70,14 @@ resolution trades one loss against another. **`/adjudicate-drafts`**
 turns each cluster into a decision with its implications laid out, so
 the call is one answer rather than an investigation. Then ingest.
 
+The gate's thresholds are calibration, not settings: each is a claim
+about where this store's corpus separates, and it expires as the
+corpus grows. When the gate reports thresholds due a re-measurement,
+**`/recalibrate-thresholds`** measures each one and proposes a value
+with its evidence. It never applies the change — a threshold tuned
+until the gate stops complaining is a gate switched off without anyone
+deciding to switch it off.
+
 See [docs/conventions.md](docs/conventions.md) § Ingestion gate.
 
 ## Preference-set lifecycle

@@ -47,6 +47,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import config as store_config  # noqa: E402  (path bootstrap above)
+
 DECISIONS_DIR = "decisions"
 PREFERENCES_FILENAME = "preferences.md"
 
@@ -57,10 +59,17 @@ UNCERTAIN = "uncertain"
 LINKED = "linked"
 VERDICT_ORDER = (DUPLICATE, RE_DECISION, UNCERTAIN, LINKED)
 
-# Similarity below this is not worth a human's attention. Deliberately
-# generous: a false cluster costs one glance, a missed duplicate costs
-# an immutable record that can never be withdrawn.
-DEFAULT_THRESHOLD = 0.35
+# The calibrated constants below are DEFAULTS sourced from
+# `config.DEFAULTS`, so there is one place a number lives and one place
+# a store overrides it (`store.config.json`). They stay module-level
+# names because every function here takes them as an ordinary
+# argument — the gate must remain callable on a bare pair of dicts,
+# with no config file anywhere near it.
+#
+# Why they are configurable at all: the right value is a property of a
+# store's corpus, not of this algorithm. See `config.CALIBRATED` and
+# the `recalibrate-thresholds` skill.
+DEFAULT_THRESHOLD = store_config.DEFAULTS["similarity_threshold"]
 
 # Asymmetric surfacing channel, for the case symmetric similarity is
 # structurally blind to: one draft re-extracted as TWO. Jaccard divides
@@ -77,16 +86,35 @@ DEFAULT_THRESHOLD = 0.35
 # split, and a half sharing little vocabulary with its bundle (0.17 in
 # the same real case) stays invisible. Surfacing one half is enough to
 # bring a human to the cluster.
-CONTAINMENT_THRESHOLD = 0.5
+CONTAINMENT_THRESHOLD = store_config.DEFAULTS["containment_threshold"]
 
 # An artifact_ref agreeing on repo+path is strong corroboration that
 # two records are about the same thing, so it lifts an otherwise
 # borderline text score over the line rather than deciding alone.
-ARTIFACT_BOOST = 0.15
+ARTIFACT_BOOST = store_config.DEFAULTS["artifact_boost"]
 
 REF_COMPLETE = "complete"
 REF_PARTIAL = "partial"
 REF_NULL = "null"
+
+
+def tuning(config: dict | None = None) -> dict:
+    """The calibrated values in effect for one run.
+
+    Threaded explicitly rather than read from a global, so a caller
+    that hands the gate two dicts and no config still gets the
+    documented defaults, and a test can vary one number without
+    mutating module state under every other test.
+    """
+    resolved = dict(
+        (key, store_config.DEFAULTS[key]) for key in store_config.CALIBRATED
+    )
+    if config:
+        for key in store_config.CALIBRATED:
+            if key in config:
+                resolved[key] = config[key]
+    return resolved
+
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
@@ -162,11 +190,12 @@ def artifact_corroborates(left: dict, right: dict) -> bool:
     return all(left_ref.get(key) == right_ref.get(key) for key in keys)
 
 
-def similarity(left: dict, right: dict) -> float:
+def similarity(left: dict, right: dict, tune: dict | None = None) -> float:
     """Combined score in 0..1: token overlap plus artifact corroboration."""
+    values = tune or tuning()
     score = jaccard(record_tokens(left), record_tokens(right))
     if artifact_corroborates(left, right):
-        score = min(1.0, score + ARTIFACT_BOOST)
+        score = min(1.0, score + values["artifact_boost"])
     return round(score, 4)
 
 
@@ -228,7 +257,7 @@ def _provenance(record: dict) -> tuple[object, object]:
 # equality would call every reworded duplicate "a different answer".
 # Measured on a real pair of batches: identical rulings scored 1.00 on
 # the option label and 0.30 on the free-text prose.
-ANSWER_AGREEMENT = 0.5
+ANSWER_AGREEMENT = store_config.DEFAULTS["answer_agreement"]
 
 
 def chosen_texts(record: dict) -> dict[str, str]:
@@ -255,7 +284,7 @@ def chosen_texts(record: dict) -> dict[str, str]:
     return texts
 
 
-def answers_agree(left: dict, right: dict) -> bool:
+def answers_agree(left: dict, right: dict, tune: dict | None = None) -> bool:
     """Did two records land on the same answer, however worded?
 
     Label against label and prose against prose, best of the two.
@@ -271,10 +300,10 @@ def answers_agree(left: dict, right: dict) -> bool:
         jaccard(tokenize(left_texts[kind]), tokenize(right_texts[kind]))
         for kind in shared
     )
-    return best >= ANSWER_AGREEMENT
+    return best >= (tune or tuning())["answer_agreement"]
 
 
-def classify(left: dict, right: dict) -> str:
+def classify(left: dict, right: dict, tune: dict | None = None) -> str:
     """Verdict for one similar pair.
 
     Provenance is what separates "the same ruling recorded twice" from
@@ -288,7 +317,7 @@ def classify(left: dict, right: dict) -> str:
     left_commit, left_session = _provenance(left)
     right_commit, right_session = _provenance(right)
 
-    same_answer = answers_agree(left, right)
+    same_answer = answers_agree(left, right, tune)
 
     if left_commit and right_commit:
         if left_commit == right_commit:
@@ -332,7 +361,8 @@ def field_diffs(left: dict, right: dict) -> dict[str, list]:
 def find_pairs(
     candidates: list[dict],
     corpus: list[dict],
-    threshold: float = DEFAULT_THRESHOLD,
+    threshold: float | None = None,
+    tune: dict | None = None,
 ) -> list[dict]:
     """Every candidate pair at or above `threshold`, worst first.
 
@@ -340,20 +370,24 @@ def find_pairs(
     a draft can duplicate another draft in the same batch, or a record
     that was ingested months ago.
     """
+    values = tune or tuning()
+    if threshold is None:
+        threshold = values["similarity_threshold"]
+    contain_at = values["containment_threshold"]
     pairs: list[dict] = []
     seen: set[tuple[int, int]] = set()
 
     def consider(left: dict, right: dict, right_side: str) -> None:
-        score = similarity(left, right)
+        score = similarity(left, right, values)
         overlap = round(containment(record_tokens(left), record_tokens(right)), 4)
-        if score < threshold and overlap < CONTAINMENT_THRESHOLD:
+        if score < threshold and overlap < contain_at:
             return
         pairs.append(
             {
                 "score": score,
                 "containment": overlap,
                 "surfaced_by": "similarity" if score >= threshold else "containment",
-                "verdict": classify(left, right),
+                "verdict": classify(left, right, values),
                 "left": identity(left),
                 "right": identity(right),
                 "right_side": right_side,
@@ -435,7 +469,7 @@ def rule_lines(preferences_text: str) -> list[str]:
 # "this fraction of the rule's terms is present". Measured on a real
 # corpus the distribution is sparse — one pair at 0.43, then a cliff to
 # 0.12 — so 0.4 sits in the gap rather than on a slope.
-FALSE_COLD_THRESHOLD = 0.4
+FALSE_COLD_THRESHOLD = store_config.DEFAULTS["false_cold_threshold"]
 
 
 def false_cold_candidates(
@@ -474,10 +508,12 @@ def build_report(
     candidates: list[dict],
     corpus: list[dict],
     root: str = ".",
-    threshold: float = DEFAULT_THRESHOLD,
+    threshold: float | None = None,
+    config: dict | None = None,
 ) -> dict:
     """The whole gate: pairs, false-cold flags, ref completeness."""
-    pairs = find_pairs(candidates, corpus, threshold)
+    values = tuning(config)
+    pairs = find_pairs(candidates, corpus, threshold, values)
 
     false_cold = []
     current = read_preferences(root)
@@ -487,7 +523,7 @@ def build_report(
         text = pinned if pinned is not None else current
         if not text:
             continue
-        matches = false_cold_candidates(record, text)
+        matches = false_cold_candidates(record, text, values["false_cold_threshold"])
         if matches:
             false_cold.append(
                 {
@@ -502,10 +538,21 @@ def build_report(
         {"id": identity(record), "tier": ref_tier(record)} for record in candidates
     ]
 
+    # Staleness is measured against the WHOLE corpus, not this batch:
+    # a threshold's evidence expires as the store grows, whether or not
+    # today's run happens to be large.
+    stale = store_config.stale_calibrations(
+        config or store_config.DEFAULTS, len(corpus) + len(candidates)
+    )
+
     return {
         "candidates": len(candidates),
         "corpus": len(corpus),
-        "threshold": threshold,
+        "threshold": threshold
+        if threshold is not None
+        else values["similarity_threshold"],
+        "tuning": values,
+        "stale_calibrations": stale,
         "pairs": pairs,
         "verdict_counts": {
             verdict: sum(1 for pair in pairs if pair["verdict"] == verdict)
@@ -603,6 +650,22 @@ def render(report: dict) -> str:
         if entry["tier"] != REF_COMPLETE:
             lines.append(f"  {entry['tier']:<8} {entry['id']}")
 
+    # Surfaced to whoever runs the gate, because they are the one
+    # person who can see whether today's verdicts look right — and a
+    # threshold nobody has measured is most visible next to the
+    # clusters it just produced.
+    stale = report.get("stale_calibrations") or []
+    if stale:
+        lines.append("")
+        lines.append(
+            f"calibration: {len(stale)} threshold(s) due a re-measurement "
+            "— run the recalibrate-thresholds skill"
+        )
+        for entry in stale:
+            lines.append(
+                f"  {entry['constant']:<22} {entry['value']}  ({entry['reason']})"
+            )
+
     lines.append("")
     lines.append(
         "Nothing was written. Duplicates go to discarded-drafts.json (never "
@@ -619,10 +682,19 @@ def main(argv: list[str] | None = None) -> int:
         "--drafts",
         help="drafts file to gate; omit to check the store against itself",
     )
-    parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="override the configured similarity_threshold for this run",
+    )
     parser.add_argument("--json", action="store_true", dest="as_json")
+    parser.add_argument(
+        "--out", help="write the JSON report here instead of stdout (implies --json)"
+    )
     args = parser.parse_args(argv)
 
+    config = store_config.load_config(args.root)
     corpus = load_records(args.root)
     if args.drafts:
         candidates = load_drafts(args.drafts)
@@ -632,9 +704,13 @@ def main(argv: list[str] | None = None) -> int:
         # but knowing is better than not.
         candidates, corpus = corpus, []
 
-    report = build_report(candidates, corpus, args.root, args.threshold)
+    report = build_report(candidates, corpus, args.root, args.threshold, config)
 
-    if args.as_json:
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+        print(f"wrote {args.out}")
+    elif args.as_json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
         print(render(report))
