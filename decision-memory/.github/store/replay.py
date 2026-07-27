@@ -32,10 +32,16 @@ change driven by re-labelling rather than by better rules is visible.
 Masking removes `role` and `rules_cited` from the options — they encode
 the original prediction and its stream — and, by default, the
 in-session `reasoning`, which was written under the OLD rule set and
-would otherwise leak that set's answer into the candidate run. Slot
-order is left untouched and slot 1 is the prediction slot by
-convention, so some ordering signal remains; it is identical for both
-runs, which is what the comparison needs.
+would otherwise leak that set's answer into the candidate run.
+
+Slot ORDER is masked too, because slot 1 is the prediction slot by
+convention and deciders pick it far more often than chance: on a real
+corpus a blind "always slot 1" scored 82%, so an unpermuted number
+measures ordering as much as it measures rules. `cases` presents each
+record's options in an order derived from its id, and `score` derives
+the same order to map a prediction back. The mapping is never written
+into the cases file — shipping it would hand the ordering signal
+straight back.
 
 Stdlib only. Usage:
 
@@ -44,11 +50,16 @@ Stdlib only. Usage:
         --preferences /tmp/baseline-preferences.md --out /tmp/base.json
     python .github/store/replay.py gate --baseline /tmp/base.json \\
         --candidate /tmp/cand.json --out /tmp/report.json
+
+`gate` exits 0 on `pass`, 1 on `fail`, and 3 on
+`insufficient-evidence` — a distinct code, because a gated stream too
+small to mean anything is not the same event as a measured regression.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -62,13 +73,32 @@ sys.path.insert(
 import budget as store_budget  # noqa: E402  (path bootstrap above)
 import config as store_config  # noqa: E402  (path bootstrap above)
 import decision_validator  # noqa: E402  (path bootstrap above)
-import preferences_guard  # noqa: E402  (path bootstrap above)
 
 DECISIONS_DIR = "decisions"
 
 PREFERENCE_DRIVEN = "preference-driven"
 COLD = "cold"
 STREAMS = (PREFERENCE_DRIVEN, COLD)
+
+GATE_PASS = "pass"
+GATE_FAIL = "fail"
+GATE_INSUFFICIENT = "insufficient-evidence"
+
+EXIT_OK = 0
+EXIT_FAIL = 1
+EXIT_INSUFFICIENT = 3
+
+
+def preferences_sha256(text: str) -> str:
+    """Content address of a preference set — what ties a replay report
+    to the exact rules it was scored against.
+
+    Lives here rather than in the guard that checks it: the guard reads
+    this module's verdicts, so the dependency runs guard -> replay and
+    only that way.
+    """
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
 
 # Option fields that leak the recorded prediction or the old rule set.
 _LEAKY_OPTION_FIELDS = ("role", "rules_cited")
@@ -96,21 +126,81 @@ def select_window(records: list[dict], window: int) -> list[dict]:
     return records[-window:] if window > 0 else []
 
 
+def _option_dicts(record: dict) -> list[dict]:
+    return [
+        option for option in (record.get("options") or []) if isinstance(option, dict)
+    ]
+
+
+def record_slots(record: dict) -> list[int]:
+    """The recorded slot numbers of a record's options, in file order.
+
+    Falls back to 1-based position for an option with no usable `slot`,
+    so a hand-written record still replays instead of crashing the run.
+    """
+    slots: list[int] = []
+    for position, option in enumerate(_option_dicts(record), start=1):
+        slot = option.get("slot")
+        usable = isinstance(slot, int) and not isinstance(slot, bool)
+        slots.append(slot if usable else position)
+    return slots
+
+
+def slot_order(record_id: str, slots: list[int]) -> list[int]:
+    """Presentation order of one record's slots — index i holds the
+    recorded slot shown in presented position i+1.
+
+    Derived from the record id (sha256 per slot) rather than stored, so
+    `score` recomputes it and the cases file never carries the mapping.
+    A shipped mapping would tell the predicting agent which presented
+    option is recorded slot 1 — the prediction slot — which is the
+    signal permuting exists to remove.
+    """
+    return sorted(
+        slots,
+        key=lambda slot: hashlib.sha256(
+            f"{record_id}:{slot}".encode("utf-8")
+        ).hexdigest(),
+    )
+
+
+def unmap_slot(record: dict, presented_slot: int) -> int:
+    """Map a presented slot number back to the recorded one.
+
+    A slot beyond the listed options maps to itself: that is the
+    free-text slot the decider may answer in (`chosen_slot` 4 against
+    three options), which was never permuted because it was never
+    presented.
+    """
+    order = slot_order(record.get("id") or "", record_slots(record))
+    if 1 <= presented_slot <= len(order):
+        return order[presented_slot - 1]
+    return presented_slot
+
+
 def mask_record(record: dict, include_reasoning: bool = False) -> dict:
-    """Strip a record down to its input side, minus the leaky fields."""
+    """Strip a record down to its input side, minus the leaky fields.
+
+    Options come back in the record's presentation order (see
+    `slot_order`) and renumbered 1..n, so neither the recorded ordering
+    nor the recorded slot numbers survive into the case.
+    """
     case = {field: record.get(field) for field in _CASE_FIELDS}
-    options = []
-    for option in record.get("options") or []:
-        if not isinstance(option, dict):
-            continue
-        masked = {
+    slots = record_slots(record)
+    masked_by_slot = {}
+    for slot, option in zip(slots, _option_dicts(record)):
+        masked_by_slot[slot] = {
             key: value
             for key, value in option.items()
             if key not in _LEAKY_OPTION_FIELDS
+            and key != "slot"
             and (include_reasoning or key not in _OLD_RULE_SET_FIELDS)
         }
-        options.append(masked)
-    case["options"] = options
+    order = slot_order(record.get("id") or "", slots)
+    case["options"] = [
+        {"slot": position, **masked_by_slot[slot]}
+        for position, slot in enumerate(order, start=1)
+    ]
     return case
 
 
@@ -121,6 +211,7 @@ def build_cases(
     return {
         "window": window,
         "count": len(selected),
+        "slot_order": "permuted",
         "instructions": (
             "For each case, predict which slot the decider will choose. "
             "Answer only from the injected preference set plus the case "
@@ -128,7 +219,10 @@ def build_cases(
             '"rules_cited"}]}; rules_cited lists the verbatim preference '
             "rules that drove the prediction and MUST be empty when none "
             "applies (an honest cold claim — cold is the control stream, "
-            "not a penalty)."
+            "not a penalty). Slot numbers are shuffled per case and carry "
+            "no meaning across cases — judge each option on its content. "
+            "If you expect the decider to answer with none of the listed "
+            "options, predict the slot one past the last one."
         ),
         "cases": [mask_record(record, include_reasoning) for record in selected],
     }
@@ -194,7 +288,10 @@ def score(
             errors.append(f"predictions: missing an entry for {record_id!r}")
             continue
         stream = PREFERENCE_DRIVEN if prediction["rules_cited"] else COLD
-        hit = prediction["predicted_slot"] == record.get("chosen_slot")
+        # Predictions are made against the permuted case, outcomes are
+        # recorded against the record — un-map before comparing.
+        predicted_slot = unmap_slot(record, prediction["predicted_slot"])
+        hit = predicted_slot == record.get("chosen_slot")
         tallies[stream]["n"] += 1
         tallies[stream]["hits"] += int(hit)
         recorded_stream = record.get("prediction_stream")
@@ -205,7 +302,8 @@ def score(
         cases.append(
             {
                 "id": record_id,
-                "predicted_slot": prediction["predicted_slot"],
+                "predicted_slot": predicted_slot,
+                "presented_slot": prediction["predicted_slot"],
                 "chosen_slot": record.get("chosen_slot"),
                 "hit": hit,
                 "stream": stream,
@@ -224,8 +322,9 @@ def score(
         "window": window,
         "scored": len(cases),
         "preferences_path": preferences_path,
-        "preferences_sha256": preferences_guard.preferences_sha256(preferences_text),
+        "preferences_sha256": preferences_sha256(preferences_text),
         "preferences_tokens": decision_validator.estimate_tokens(preferences_text),
+        "slot_order": "permuted",
         "streams": {
             stream: {
                 "n": tallies[stream]["n"],
@@ -240,9 +339,23 @@ def score(
     return report, errors
 
 
-def gate(baseline: dict, candidate: dict) -> dict:
-    """Compare two scored runs. The preference-driven stream is the gate."""
+def gate(baseline: dict, candidate: dict, min_gated_cases: int = 0) -> dict:
+    """Compare two scored runs. The preference-driven stream is the gate.
+
+    Returns a report whose `gate` is one of:
+
+    - `pass` — the gated hit rate held, over enough cases to mean it.
+    - `fail` — a measured regression, or two runs that are not
+      comparable. Always wins over `insufficient-evidence`: a
+      degradation visible at small n is still a degradation.
+    - `insufficient-evidence` — nothing degraded, but the gated stream
+      is smaller than `min_gated_cases`, so the pass carries no
+      evidence. Reported rather than upgraded to `pass`, because a
+      green check that means nothing is worse than an amber one that
+      says so.
+    """
     reasons: list[str] = []
+    notes: list[str] = []
 
     base_ids = [case["id"] for case in baseline.get("cases", [])]
     cand_ids = [case["id"] for case in candidate.get("cases", [])]
@@ -269,10 +382,30 @@ def gate(baseline: dict, candidate: dict) -> dict:
             "the candidate set drove no predictions at all — every case went cold"
         )
 
+    gated_cases = cand_pd.get("n") or 0
+    if gated_cases < min_gated_cases:
+        notes.append(
+            f"only {gated_cases} preference-driven case(s), below the "
+            f"{min_gated_cases} this store requires — the gated hit rate is "
+            "noise at this size. A human owns this compaction: apply the "
+            "replay-waiver label to merge it, or grow the preference-driven "
+            "stream by extracting rules first"
+        )
+
+    if reasons:
+        verdict = GATE_FAIL
+    elif notes:
+        verdict = GATE_INSUFFICIENT
+    else:
+        verdict = GATE_PASS
+
     shifts = candidate.get("stream_shifts", [])
     return {
-        "gate": "fail" if reasons else "pass",
+        "gate": verdict,
         "reasons": reasons,
+        "notes": notes,
+        "gated_cases": gated_cases,
+        "min_gated_cases": min_gated_cases,
         "window": candidate.get("window"),
         "scored": candidate.get("scored"),
         "baseline_preferences_sha256": baseline.get("preferences_sha256"),
@@ -354,11 +487,21 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.command == "gate":
-        report = gate(_read_json(args.baseline), _read_json(args.candidate))
+        report = gate(
+            _read_json(args.baseline),
+            _read_json(args.candidate),
+            int(config["min_gated_cases"]),
+        )
         _emit(report, args.out)
         for reason in report["reasons"]:
             print(f"GATE FAIL: {reason}", file=sys.stderr)
-        return 1 if report["gate"] == "fail" else 0
+        for note in report["notes"]:
+            print(f"GATE INSUFFICIENT EVIDENCE: {note}", file=sys.stderr)
+        if report["gate"] == GATE_FAIL:
+            return EXIT_FAIL
+        if report["gate"] == GATE_INSUFFICIENT:
+            return EXIT_INSUFFICIENT
+        return EXIT_OK
 
     window = args.window or int(config["replay_window"])
     records = load_records(args.root)

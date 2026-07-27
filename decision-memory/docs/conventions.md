@@ -183,9 +183,11 @@ everywhere — new optional fields need no migration.
 
 ## Active preference set (`preferences.md`)
 
-- Hard token budget: ~2k tokens, CI-enforced. Promoting a rule at
-  budget means merging or demoting another ("promote requires
-  demote").
+- Hard token budget, CI-enforced. The number is `budget_tokens` in the
+  store-owned `store.config.json`; the vendored guard
+  reads that value, so the budget is checked in exactly one place
+  against exactly one authority. Promoting a rule at budget means
+  merging or demoting another ("promote requires demote").
 - Rules are conditional and falsifiable, one bullet each, with a
   confirmation counter and last-confirmed date:
   `[confirmed: <N>, last: <YYYY-MM-DD>]`.
@@ -202,6 +204,80 @@ everywhere — new optional fields need no migration.
   human `pref-promote` commit moves content into `preferences.md`.
   Merging a proposal file is NOT promotion.
 
+## Ingestion gate
+
+Drafts are mutable; records are not. Everything below is fixable only
+before ingestion, so `.github/store/similarity.py` runs over the drafts
+plus the store first:
+
+- **Duplicates** — the same ruling extracted twice (two runs over one
+  session) would mint two immutable records for one decision. Classified
+  by provenance: same `preference_set.commit` + same `chosen`. The
+  remedy is discarding one to `discarded-drafts.json`, never deleting.
+- **Re-decisions** — a `related`/`supersedes` edge cannot be added after
+  ingestion without violating append-only, so ingestion is the ONLY
+  moment an edge can be written.
+- **False cold** — `preference_set.commit` content-addresses the active
+  set precisely so a false cold claim is a detectable provenance defect;
+  the gate runs that check against the pinned set. Advisory, human
+  confirms, and a confirmed one is restreamed in the draft.
+- **`artifact_ref` completeness** — chat-extracted drafts carry
+  null/partial refs by design and are enriched here, once the commits
+  exist. SHAs are never guessed.
+
+The gate reports and never writes; `/adjudicate-drafts` proposes a
+resolution per cluster with what each way costs, and a human decides.
+An undetected duplicate is not merely a wasted file — it double-counts
+as evidence, and cross-record repetition is exactly what extraction
+reads as the signal that a pattern is a principle. Details in
+[.github/store/README.md](../.github/store/README.md).
+
+## Preference-set lifecycle
+
+The active set is grown by extraction and shrunk by compaction, in
+that order — there is nothing to compact until rules exist, and the
+compaction gate cannot measure a rule set no record was scored
+against.
+
+- **Extraction** (`.agents/skills/extract-preferences/`, driven by
+  `.github/store/extraction.py`) runs on the PR that ingests a
+  session and, per pattern, does exactly one of: bump a counter, flag
+  drift, or propose a rule. It never writes to `decisions/`.
+  **The watermark is a `pref-extract:` commit**, so the scope is
+  everything recorded since the last one — derived from history, never
+  tracked beside it. Nothing to advance or keep in sync, nothing to
+  conflict when two branches run a pass at once; a session that merged
+  without a pass is picked up by the next one rather than lost; and the
+  first pass on a corpus needs no special mode, because no
+  `pref-extract:` commit means the whole corpus is in scope.
+  An empty pass commits too (`--allow-empty`) — see § Commit types.
+  Scope and evidence are separate: the pass ACTS on the records since
+  the watermark and REASONS from the whole corpus, because
+  cross-session repetition is the evidence one session cannot see.
+  A PR adding records must contain a `pref-extract:` commit with no
+  record added after it — extraction is the last step of the pass. The
+  check is positional; there is nothing to enumerate.
+- **Budget** (`.github/store/budget.py`) reports usage against
+  `budget_tokens` on every push to `main`, keeping one pinned
+  "compression due" issue in sync. It reports; it never blocks.
+- **Compaction** (`.agents/skills/compact-preferences/`, driven by
+  `.github/store/replay.py`) merges overlapping rules, drops dead
+  ones, tightens wording, then replays the last `replay_window`
+  decisions under the old and new sets and compares the
+  preference-driven hit rate. A carve-out PR carries the gate report
+  in its description and the carve-out label; CI verifies the report
+  is `pass` and was produced against the exact `preferences.md` in the
+  PR head.
+- **Small-n honesty.** Below `min_gated_cases` preference-driven
+  cases, the gate returns `insufficient-evidence` rather than `pass`,
+  and CI accepts that only with the replay-waiver label. A store with
+  no extracted rules yet needs the waiver on every compaction. That is
+  the honest state and it is meant to be visible.
+- **Slot ordering is masked.** Replay cases present each record's
+  options in an order derived from its ID and scoring maps predictions
+  back, so the number measures rules rather than the convention that
+  slot 1 is the prediction slot.
+
 ## Commit types
 
 This repo's own conventional-commit types, CI-linted on every PR
@@ -211,7 +287,31 @@ commit:
 - `pref-proposal: <rule>`
 - `pref-promote: <rule>` (human only)
 - `pref-confirm: <rule> (n=<count>)` (counter bump)
+- `pref-compact: <summary>` (compaction of the active set)
+- `pref-drift: <summary>` (a rule the records contradict)
+- `pref-extract: <summary>` (an extraction pass — the watermark)
 - `chore: ...` (structure, CI, docs)
+
+Three of these may REMOVE lines from `preferences.md`:
+`pref-confirm` (counter bumps, math CI-validated),
+`pref-promote` (a human adopting a rule, possibly demoting another to
+make room), and `pref-compact` (rewriting the set without adding
+anything that was not already promoted).
+They are separate types because they are separate acts: compaction is
+not promotion, and a log where both read `pref-promote:` cannot tell a
+reader which one happened.
+The human gate on compaction is the merge plus the carve-out label,
+not the commit subject.
+
+`pref-drift` adds a file to `proposals/` and never touches
+`preferences.md`: a rule the records contradict is conditionalized or
+retired by a human, never silently overwritten.
+
+`pref-extract` closes an extraction pass and is usually EMPTY
+(`--allow-empty`). Its position in history is the extraction
+watermark, so it is committed even when the pass found nothing — a
+watermark that only moved on findings would stall every time
+extraction legitimately had nothing to say.
 
 Examples:
 
@@ -220,6 +320,9 @@ decision(factory): repo hosting — private GitHub over self-hosted/synced
 decision(factory): agent access — collaborators+PRs over read-only key
 pref-proposal: prefers CI-enforced integrity over access restrictions
 pref-confirm: rejects new infrastructure dependencies (n=4)
+pref-compact: compact active set — 7 rules -> 4 (~1.8k -> ~1.1k tokens)
+pref-drift: infrastructure rule mispredicts solution shape (3 records)
+pref-extract: 4 records — 1 proposal, 1 unexplained
 ```
 
 ## PR flow
@@ -246,10 +349,19 @@ Stdlib-only, no dependencies; fails soft on factory loss. Checks:
 
 - Append-only on `decisions/**` (no modify/delete/rename, no
   exceptions); `preferences.md` line removals only from
-  `pref-confirm`/`pref-promote` commits, counter math validated.
+  `pref-confirm`/`pref-promote`/`pref-compact` commits, counter math
+  validated.
 - Schema + consistency on the ENTIRE corpus every run — guard updates
   can never retroactively invalidate or silently mis-accept records
   without it showing.
 - Dangling-reference check on `related`/`supersedes`/`drill_down_of`.
-- Token budget on `preferences.md`.
+- Token budget on `preferences.md`, against `budget_tokens`.
 - Commit lint (the types above).
+- A PR adding records contains a `pref-extract:` commit, with no
+  record added after it.
+
+`.github/store/` — vendored from the same subtemplate — adds the
+preference-set lifecycle on top: the carve-out label, the replay gate,
+the budget report, and the extraction batch. The two directories split
+by audience, not by trust: `guards/` is the record contract the writer
+tool shares, `store/` is everything about `preferences.md`.

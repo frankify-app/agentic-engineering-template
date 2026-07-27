@@ -1,6 +1,6 @@
 ---
 name: compact-preferences
-description: Compact preferences.md — merge overlapping rules, drop superseded or expired ones, tighten wording — then replay the last decisions against the compacted set and open a gated carve-out PR. Use when the budget workflow reports "compression due", when preferences.md is at or over its token budget, or when the user asks to compact, shrink, or clean up the preference set.
+description: Shrink preferences.md below its token budget, gated on a replay of recent decisions. Use when the budget reports "compression due", when preferences.md is at or over budget, or on request to compact the preference set.
 ---
 
 # Compacting the active preference set
@@ -10,15 +10,20 @@ description: Compact preferences.md — merge overlapping rules, drop superseded
 > change it in the template and pull via `copier update`.
 
 `preferences.md` is injected into every grilled session, so every rule
-in it costs context on every session, forever. Compaction is how that
-cost comes back down without losing what the rules encode.
+costs context forever. Compaction brings that cost down without losing
+what the rules encode.
 
-Manual trigger only — never on a schedule, never as a side effect of
-another task. A human merges the result.
+Manual trigger only — never on a schedule, never as a side effect. A
+human merges the result.
+
+**Extraction comes first.** If the store has never been extracted into
+(`extraction.py status` shows the whole corpus pending, or every record
+reads `prediction_stream: cold`), there is nothing to gate against —
+run `extract-preferences` first.
 
 ## Invariants
 
-Break any of these and CI rejects the PR, as it should.
+CI rejects the PR if any of these break.
 
 - `decisions/` stays append-only. Compaction rewrites the ACTIVE SET,
   never history. Do not modify, delete, or rename a single record —
@@ -60,10 +65,11 @@ git show origin/main:preferences.md > /tmp/baseline-preferences.md
 python .github/store/replay.py cases --out /tmp/cases.json
 ```
 
-`cases.json` holds the last ~20 decisions **masked to their input
-side** — question, context, and the options with the recorded
-prediction role, cited rules and in-session reasoning stripped out.
-The window comes from `replay_window` in `store.config.json`.
+`cases.json` holds the most recent decisions (`replay_window` in
+`store.config.json`) **masked to their input side** — question,
+context, and options with the recorded prediction role, cited rules and
+in-session reasoning stripped, in a per-record shuffled order so slot
+position carries no signal.
 
 ### 4. Predict under the baseline set
 
@@ -137,45 +143,63 @@ python .github/store/replay.py gate \
   --out /tmp/replay-report.json
 ```
 
-`gate` exits non-zero when the **preference-driven** hit rate
-degrades. That stream is the gate. The **cold** stream is the control
-group: it measures plain judgment, which a rule-set edit should barely
-move — a large swing there says the two runs were not comparable, so
-re-run rather than explain it away.
+`gate` reports one of three verdicts, with a distinct exit code each:
+
+- **`pass`** (exit 0) — the **preference-driven** hit rate held, over
+  enough cases to mean it. That stream is the gate. The **cold**
+  stream is the control group: it measures plain judgment, which a
+  rule-set edit should barely move — a large swing there says the two
+  runs were not comparable, so re-run rather than explain it away.
+- **`fail`** (exit 1) — a measured regression, or two runs that are
+  not comparable. Revise the compaction and re-run this step. Never
+  merge a failing gate, and never edit the report to make it pass.
+- **`insufficient-evidence`** (exit 3) — nothing degraded, but fewer
+  than `min_gated_cases` cases were preference-driven, so the pass
+  carries no evidence. This is the expected verdict on a store whose
+  records are all `cold` because no rules have been extracted yet.
 
 Cases shift streams under the compacted set (a merged rule may now
 match a case that was cold, or a dropped rule may leave one cold).
 Each case scores under the stream the candidate set assigns; the
 report counts the shifts so a hit-rate change caused by re-labelling
 rather than by better rules is visible. Read them before trusting a
-pass.
+pass — a candidate whose gated `n` moved a lot under a small edit is
+measuring its own labelling, not its rules.
 
-If the gate fails: revise the compaction and re-run this step. Never
-merge a failing gate, and never edit the report to make it pass.
+Slot numbers in the cases are shuffled per record and mapped back
+during scoring, so a run cannot score by learning that slot 1 is the
+prediction slot. `predicted_slot` in the report is the recorded slot;
+`presented_slot` is what the run answered.
+
+On `insufficient-evidence`, extract first: run `extract-preferences`,
+let sessions score against the rules, and compact once the gated stream
+can carry the claim. If the compaction cannot wait, add the
+`replay_waiver_label` from `store.config.json` alongside the carve-out
+label and state in the PR description why a human accepts an
+unvalidated compaction. The waiver does not apply to a `fail`, by
+design.
 
 ### 7. Commit
 
-One commit, `pref-promote:` type:
+One commit, `pref-compact:` type:
 
 ```text
-pref-promote: compact active set — 7 rules -> 4 (~1.8k -> ~1.1k tokens)
+pref-compact: compact active set — 7 rules -> 4 (~1.8k -> ~1.1k tokens)
 ```
 
-`pref-promote` is the only commit type the vendored guard permits to
-remove lines from `preferences.md`. Promotion stays human-only where
-it matters: a human merges the PR, and compaction adds no rule that
-was not already promoted.
+`pref-compact` exists so the log can tell compaction from promotion —
+both remove lines from `preferences.md`, but promotion adopts a rule a
+human decided on.
 
 ### 8. Open the PR
 
 Draft PR, carrying:
 
-- the carve-out label from `store.config.json`
-  (`carve_out_label`, default `preferences-carve-out`) — without it
-  CI rejects the edit to existing lines. Create it once if it does not
-  exist yet: `gh label create preferences-carve-out`. In managed
-  environments use the forge tooling the environment declares, not
-  `gh`.
+- the `carve_out_label` from `store.config.json` — without it CI
+  rejects the edit to existing lines. Create the label once if it does
+  not exist, using the forge tooling the environment declares.
+- the `replay_waiver_label` ONLY when the gate returned
+  `insufficient-evidence` and step 6's reasoning applies.
 - the replay report, verbatim, in the description:
 
 ````markdown
@@ -198,6 +222,5 @@ description.
 ## Afterwards
 
 Merging a compaction PR is a decision. If the session that produced it
-was a grilling session, it gets a record like any other — through the
-recorder, in its own PR. Compaction itself never writes to
-`decisions/`.
+was a grilling session, it gets a record like any other, through the
+recorder in its own PR. Compaction never writes to `decisions/`.

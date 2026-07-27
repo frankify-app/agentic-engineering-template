@@ -139,7 +139,8 @@ _skip_if_exists:
   - "{% if agentic_subtemplate == 'template' %}docs/conventions.md{% endif %}"
   # The store's preference set and its config knobs are seeded once and
   # owned by the store; everything else in the decision-memory subtemplate is
-  # vendored (overwritten on copier update).
+  # vendored (overwritten on copier update). Clobbering either would reset a
+  # budget a human tuned.
   - "{% if agentic_subtemplate == 'decision-memory' %}preferences.md{% endif %}"
   - "{% if agentic_subtemplate == 'decision-memory' %}store.config.json{% endif %}"
 _jinja_extensions:

@@ -16,15 +16,20 @@ PROJECT_ROOT = Path(__file__).parent.parent
 
 STORE_FILES = frozenset(
     {
+        ".agents/skills/adjudicate-drafts/SKILL.md",
         ".agents/skills/compact-preferences/SKILL.md",
+        ".agents/skills/extract-preferences/SKILL.md",
+        ".agents/skills/recalibrate-thresholds/SKILL.md",
         ".copier-answers.agentic.yml",
         ".github/guards/decision_validator.py",
         ".github/guards/guards.py",
         ".github/store/README.md",
         ".github/store/budget.py",
         ".github/store/config.py",
+        ".github/store/extraction.py",
         ".github/store/preferences_guard.py",
         ".github/store/replay.py",
+        ".github/store/similarity.py",
         ".github/store/tests/test_store.py",
         ".github/workflows/preferences-budget.yml",
         ".github/workflows/preferences-guard.yml",
@@ -149,6 +154,15 @@ def test_store_config_survives_a_re_render(tmp_path: Path) -> None:
         vcs_ref="HEAD",
     )
     assert config.read_text() == tuned
+
+
+def test_store_render_ships_both_lifecycle_skills(tmp_path: Path) -> None:
+    """Extraction grows the set, compaction shrinks it — a store that
+    got only one half would have no way to run the other."""
+    dst_path = _render_store(tmp_path)
+    skills = dst_path / ".agents" / "skills"
+    assert (skills / "extract-preferences" / "SKILL.md").is_file()
+    assert (skills / "compact-preferences" / "SKILL.md").is_file()
 
 
 def test_default_render_contains_no_guard_files(

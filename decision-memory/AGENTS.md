@@ -28,8 +28,13 @@ authoritative contract.
   parked on someone else's branch. Hand-written records are allowed;
   they get no help and face the same guards.
 - `preferences.md` may only change via counter-line bumps
-  (`pref-confirm`) or human promotion (`pref-promote`). Promotion is
-  human-only, always.
+  (`pref-confirm`), human promotion (`pref-promote`), or a gated
+  compaction (`pref-compact`, carve-out label + replay report).
+  Promotion is human-only, always.
+- Growing and shrinking the preference set are two manual skills, run
+  in that order — see [Preference-set lifecycle](#preference-set-lifecycle)
+  below. Neither runs on a schedule or as a side effect of another
+  task.
 - Never write this repo's URL into any public artifact. Consumers
   reference it via the `DECISION_MEMORY_URL` env var only.
 
@@ -41,17 +46,83 @@ authoritative contract.
 - One PR per session; one commit per record.
 - Commit types are this repo's own and are CI-linted — see
   [docs/conventions.md](docs/conventions.md) (`decision(...)`,
-  `pref-proposal`, `pref-promote`, `pref-confirm`, `chore`).
+  `pref-proposal`, `pref-promote`, `pref-confirm`, `pref-compact`,
+  `pref-drift`, `pref-extract`, `chore`).
 - In managed environments (e.g. Claude Code on the Web), ALWAYS use
   the tooling the environment itself declares for forge operations
   (PR creation etc.) — `gh`/`curl` are typically sabotaged there. The
   recorder's `submit` hands the PR off to you in that case.
 
+## Before ingesting drafts
+
+Run the ingestion gate over the drafts and the store:
+
+```bash
+python .github/store/similarity.py --drafts <drafts.json>
+```
+
+`decisions/` is append-only, so duplicates, missing re-decision links,
+false cold claims and unenriched `artifact_ref`s are all fixable ONLY
+while the drafts are still drafts.
+
+The gate finds clusters and deliberately does not resolve them — every
+resolution trades one loss against another. **`/adjudicate-drafts`**
+turns each cluster into a decision with its implications laid out, so
+the call is one answer rather than an investigation.
+
+Then ingest. Each surviving draft becomes **one record file and one
+commit** — `record.py record` does the split, so a batch is never one
+bulk commit. That is what makes partial acceptance possible: a reviewer
+drops or reverts individual commits before merge.
+
+The gate's thresholds are calibration, not settings: each is a claim
+about where this store's corpus separates, and it expires as the
+corpus grows. When the gate reports thresholds due a re-measurement,
+**`/recalibrate-thresholds`** measures each one and proposes a value
+with its evidence. It never applies the change — a threshold tuned
+until the gate stops complaining is a gate switched off without anyone
+deciding to switch it off.
+
+See [docs/conventions.md](docs/conventions.md) § Ingestion gate.
+
+## Preference-set lifecycle
+
+`preferences.md` is injected into every grilled session, so every rule
+in it is a permanent per-session context tax. Two manual, human-merged
+skills manage it. **Run them in this order** — there is nothing to
+compact until rules have been extracted, and the compaction gate
+cannot measure a rule set no record was ever scored against.
+
+1. **`/extract-preferences`** — runs on the PR that ingests a session.
+   Per pattern it does exactly one of: bump a counter, flag drift
+   against a rule the records contradict, or propose a new rule. Reads
+   `decisions/`, never writes there. The pass ends with a
+   `pref-extract:` commit whose position is the watermark, so a PR
+   adding records must carry one with no record added after it. An
+   empty pass commits too.
+2. **`/compact-preferences`** — merges, drops and tightens, then
+   replays the last decisions under the old and new sets and gates on
+   the preference-driven hit rate. Needs the carve-out label and a
+   fresh replay report in the PR description.
+
+Status, any time:
+
+```bash
+python .github/store/budget.py              # tokens, percent, level
+python .github/store/extraction.py status   # records since the last pass
+```
+
+The budget workflow opens a pinned "compression due" issue on its own
+when the file approaches its budget — that issue, not a schedule, is
+the trigger for compaction. Knobs live in `store.config.json`
+(store-owned, never clobbered by `copier update`); the flow is
+documented in [.github/store/README.md](.github/store/README.md).
+
 ## Pointers
 
 - [docs/conventions.md](docs/conventions.md) — the authoritative
   writing contract: record schema, field conventions, commit types,
-  PR flow.
+  PR flow, preference-set lifecycle.
 - [docs/extraction-prompt.md](docs/extraction-prompt.md) — paste into
   any chat to extract draft records from a past conversation.
 - `.github/guards/`, the docs, and this file are vendored from the
