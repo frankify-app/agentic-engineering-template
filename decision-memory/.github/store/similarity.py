@@ -1,0 +1,587 @@
+"""Ingestion gate: dedup, re-decision links, false-cold, ref completeness.
+
+Copier-vendored from the agentic-engineering-template decision-memory
+subtemplate — change it there, pull via `copier update`.
+
+Run this over a drafts file plus the store, BEFORE ingestion. Every
+check here shares one deadline: **drafts are mutable and records are
+not.** `decisions/` is append-only with no carve-out, so whatever is
+not fixed at ingestion is frozen permanently.
+
+That is what separates this gate from the analysis passes. Those read
+immutable history and can run any time; these three cannot.
+
+1. **Dedup.** The same ruling extracted twice — by two runs over one
+   session, say — would mint two immutable records for one decision.
+2. **Re-decision links.** A `related`/`supersedes` edge cannot be added
+   after ingestion without violating append-only, so ingestion is the
+   only moment an edge can be written. An unlinked re-decision is a
+   permanently disconnected node.
+3. **False cold + ref completeness.** A record claiming
+   `prediction_stream: cold` while a matching rule was active
+   permanently understates that rule's evidence, and the replay gate's
+   stream split is built on that field. A null `artifact_ref` that
+   could have been filled stays null forever.
+
+**The gate never writes.** It reports and a human acts: discarding a
+duplicate to `discarded-drafts.json` (never deleting it), adding a link
+to a draft, restreaming a false cold, enriching a ref. Every one of
+those is a judgement call, and the tool's job is to make sure the call
+gets made while it still can be.
+
+Stdlib only. Usage:
+
+    python .github/store/similarity.py --drafts drafts.json
+    python .github/store/similarity.py --drafts drafts.json --json
+    python .github/store/similarity.py            # store against itself
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+DECISIONS_DIR = "decisions"
+PREFERENCES_FILENAME = "preferences.md"
+
+# Pair verdicts, worst first — the order the report ranks by.
+DUPLICATE = "duplicate"
+RE_DECISION = "re-decision"
+UNCERTAIN = "uncertain"
+LINKED = "linked"
+VERDICT_ORDER = (DUPLICATE, RE_DECISION, UNCERTAIN, LINKED)
+
+# Similarity below this is not worth a human's attention. Deliberately
+# generous: a false cluster costs one glance, a missed duplicate costs
+# an immutable record that can never be withdrawn.
+DEFAULT_THRESHOLD = 0.35
+
+# An artifact_ref agreeing on repo+path is strong corroboration that
+# two records are about the same thing, so it lifts an otherwise
+# borderline text score over the line rather than deciding alone.
+ARTIFACT_BOOST = 0.15
+
+REF_COMPLETE = "complete"
+REF_PARTIAL = "partial"
+REF_NULL = "null"
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+# Dropped before comparison: these carry no signal about WHICH decision
+# a record is, and leaving them in inflates every pair's score toward a
+# uniform middle where nothing stands out.
+_STOPWORDS = frozenset(
+    """
+    a an and are as at be by do does for from has have how i in is it its of on
+    or that the this to was what when where which who why will with we you
+    should would could not no yes if then than there their them these those
+    """.split()
+)
+
+
+def tokenize(text: object) -> set[str]:
+    """Content words of a string, lowercased and de-duplicated."""
+    if not isinstance(text, str):
+        return set()
+    return {word for word in _WORD_RE.findall(text.lower()) if word not in _STOPWORDS}
+
+
+def record_tokens(record: dict) -> set[str]:
+    """The tokens that identify WHICH decision this is.
+
+    Question plus option labels: the input side, which both a duplicate
+    and a re-decision share. Deliberately not `chosen` — two records of
+    the same question with different answers are the interesting case,
+    and scoring the answer in would push them apart.
+    """
+    tokens = tokenize(record.get("question"))
+    for option in record.get("options") or []:
+        if isinstance(option, dict):
+            tokens |= tokenize(option.get("label"))
+    return tokens
+
+
+def jaccard(left: set[str], right: set[str]) -> float:
+    if not left or not right:
+        return 0.0
+    return len(left & right) / len(left | right)
+
+
+def _ref(record: dict) -> dict:
+    ref = record.get("artifact_ref")
+    return ref if isinstance(ref, dict) else {}
+
+
+def artifact_corroborates(left: dict, right: dict) -> bool:
+    """Do two records point at the same artifact?
+
+    Repo+path agreement is the signal; commit is not required, because
+    two records about one file at different SHAs are exactly the
+    re-decision case this gate is looking for.
+    """
+    left_ref, right_ref = _ref(left), _ref(right)
+    if not left_ref or not right_ref:
+        return False
+    keys = ("repo", "path")
+    if any(not left_ref.get(key) for key in keys):
+        return False
+    return all(left_ref.get(key) == right_ref.get(key) for key in keys)
+
+
+def similarity(left: dict, right: dict) -> float:
+    """Combined score in 0..1: token overlap plus artifact corroboration."""
+    score = jaccard(record_tokens(left), record_tokens(right))
+    if artifact_corroborates(left, right):
+        score = min(1.0, score + ARTIFACT_BOOST)
+    return round(score, 4)
+
+
+def identity(record: dict) -> str | None:
+    """What to call this thing in a report.
+
+    Drafts are keyed by `slug` and only gain an `id` when the recorder
+    mints one at ingestion — which is after this gate runs, by
+    definition. A gate that only understood `id` would print `None` for
+    every draft it was built to check.
+    """
+    for key in ("id", "slug"):
+        value = record.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+# Resolved link fields, and the batch-local slug forms drafts carry
+# before ingestion resolves them into IDs. Both are checked, because a
+# link written in a draft is exactly the thing this gate exists to
+# preserve — reporting it as missing would send a human to re-add an
+# edge that is already there.
+_LINK_FIELDS = (
+    ("related", "related_slugs"),
+    ("supersedes", "supersedes_slug"),
+    ("drill_down_of", "drill_down_of_slug"),
+)
+
+
+def _linked(left: dict, right: dict) -> bool:
+    """Is either record already pointing at the other?"""
+    for source, target in ((left, right), (right, left)):
+        names = {
+            value
+            for key in ("id", "slug")
+            for value in [target.get(key)]
+            if isinstance(value, str) and value
+        }
+        if not names:
+            continue
+        for resolved_field, slug_field in _LINK_FIELDS:
+            for field in (resolved_field, slug_field):
+                value = source.get(field)
+                if isinstance(value, str) and value in names:
+                    return True
+                if isinstance(value, list) and names & set(value):
+                    return True
+    return False
+
+
+def _provenance(record: dict) -> tuple[object, object]:
+    preference_set = record.get("preference_set")
+    commit = preference_set.get("commit") if isinstance(preference_set, dict) else None
+    return commit, record.get("session")
+
+
+# Two extractions of one ruling reword the answer freely, so exact
+# equality would call every reworded duplicate "a different answer".
+# Measured on a real pair of batches: identical rulings scored 1.00 on
+# the option label and 0.30 on the free-text prose.
+ANSWER_AGREEMENT = 0.5
+
+
+def chosen_texts(record: dict) -> dict[str, str]:
+    """The two phrasings of what was chosen, keyed by kind.
+
+    `chosen_slot` is NOT comparable across extractions: two runs that
+    listed the same options in a different order give one ruling
+    different slot numbers (seen in real data — slot 1 vs slot 3 for
+    the same answer). The label the slot points at survives that; the
+    free-text `chosen` is the fallback for a slot beyond the listed
+    options, and the two are kept apart so they are only ever compared
+    like with like.
+    """
+    texts: dict[str, str] = {}
+    slot = record.get("chosen_slot")
+    for option in record.get("options") or []:
+        if isinstance(option, dict) and option.get("slot") == slot:
+            label = option.get("label")
+            if isinstance(label, str) and label:
+                texts["label"] = label
+    chosen = record.get("chosen")
+    if isinstance(chosen, str) and chosen:
+        texts["prose"] = chosen
+    return texts
+
+
+def answers_agree(left: dict, right: dict) -> bool:
+    """Did two records land on the same answer, however worded?
+
+    Label against label and prose against prose, best of the two.
+    Never label against prose: one record's option label routinely
+    echoes the other's question, which would read as agreement between
+    answers that have nothing to do with each other.
+    """
+    left_texts, right_texts = chosen_texts(left), chosen_texts(right)
+    shared = set(left_texts) & set(right_texts)
+    if not shared:
+        return not left_texts and not right_texts
+    best = max(
+        jaccard(tokenize(left_texts[kind]), tokenize(right_texts[kind]))
+        for kind in shared
+    )
+    return best >= ANSWER_AGREEMENT
+
+
+def classify(left: dict, right: dict) -> str:
+    """Verdict for one similar pair.
+
+    Provenance is what separates "the same ruling recorded twice" from
+    "the same question decided again later". `preference_set.commit`
+    content-addresses the rule set the decision was made under, so two
+    records sharing it were made against the same state of the world.
+    """
+    if _linked(left, right):
+        return LINKED
+
+    left_commit, left_session = _provenance(left)
+    right_commit, right_session = _provenance(right)
+
+    same_answer = answers_agree(left, right)
+
+    if left_commit and right_commit:
+        if left_commit == right_commit:
+            # Same rule set, same answer, no link: one ruling recorded
+            # twice. Different answer under one rule set is a genuine
+            # re-decision within a session, which still wants an edge.
+            return DUPLICATE if same_answer else RE_DECISION
+        return RE_DECISION
+
+    # Chat-extracted drafts carry null provenance by design, so absence
+    # is normal and must not be read as "distinct". Fall back to the
+    # session key, then to the answer.
+    if left_session and right_session and left_session == right_session:
+        return DUPLICATE if same_answer else UNCERTAIN
+    if left_session and right_session and left_session != right_session:
+        return RE_DECISION
+    return DUPLICATE if same_answer else UNCERTAIN
+
+
+_DIFF_FIELDS = (
+    "question",
+    "project",
+    "chosen",
+    "chosen_slot",
+    "operative_reason",
+    "prediction_stream",
+    "outcome",
+    "date",
+)
+
+
+def field_diffs(left: dict, right: dict) -> dict[str, list]:
+    """Per-field differences, so a human can adjudicate from the report."""
+    diffs = {}
+    for field in _DIFF_FIELDS:
+        if left.get(field) != right.get(field):
+            diffs[field] = [left.get(field), right.get(field)]
+    return diffs
+
+
+def find_pairs(
+    candidates: list[dict],
+    corpus: list[dict],
+    threshold: float = DEFAULT_THRESHOLD,
+) -> list[dict]:
+    """Every candidate pair at or above `threshold`, worst first.
+
+    Candidates are compared against each other AND against the corpus:
+    a draft can duplicate another draft in the same batch, or a record
+    that was ingested months ago.
+    """
+    pairs: list[dict] = []
+    seen: set[tuple[int, int]] = set()
+
+    def consider(left: dict, right: dict, right_side: str) -> None:
+        score = similarity(left, right)
+        if score < threshold:
+            return
+        pairs.append(
+            {
+                "score": score,
+                "verdict": classify(left, right),
+                "left": identity(left),
+                "right": identity(right),
+                "right_side": right_side,
+                "artifact_corroborated": artifact_corroborates(left, right),
+                "diffs": field_diffs(left, right),
+            }
+        )
+
+    for i, left in enumerate(candidates):
+        for j, right in enumerate(candidates):
+            if i >= j or (i, j) in seen:
+                continue
+            seen.add((i, j))
+            consider(left, right, "draft")
+        for record in corpus:
+            consider(left, record, "store")
+
+    pairs.sort(key=lambda pair: (VERDICT_ORDER.index(pair["verdict"]), -pair["score"]))
+    return pairs
+
+
+def ref_tier(record: dict) -> str:
+    """How complete is this draft's `artifact_ref`?
+
+    Enrichment is only possible while the draft is mutable, so a tier
+    of `partial` or `null` here is a task with a deadline. Conventions
+    forbid guessing SHAs, so this reports and never fills anything in.
+    """
+    ref = _ref(record)
+    if not ref:
+        return REF_NULL
+    present = [key for key in ("repo", "path", "commit") if ref.get(key)]
+    if len(present) == 3:
+        return REF_COMPLETE
+    return REF_PARTIAL if present else REF_NULL
+
+
+def _git(*args: str) -> str:
+    result = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
+    return result.stdout if result.returncode == 0 else ""
+
+
+def preferences_at(commit: object, root: str = ".") -> str | None:
+    """`preferences.md` as of a pinned commit, or None if unavailable.
+
+    A draft with no pinned commit, or a commit this checkout does not
+    have, yields None — the check is skipped and said to be skipped,
+    rather than silently compared against the wrong rule set.
+    """
+    if not isinstance(commit, str) or not commit:
+        return None
+    text = _git("-C", root, "show", f"{commit}:{PREFERENCES_FILENAME}")
+    return text or None
+
+
+def rule_lines(preferences_text: str) -> list[str]:
+    """The rule bullets of a preference set, without the prose around them."""
+    return [
+        line.strip()
+        for line in preferences_text.splitlines()
+        if line.strip().startswith("- ")
+    ]
+
+
+def false_cold_candidates(
+    record: dict, preferences_text: str, threshold: float = 0.18
+) -> list[dict]:
+    """Rules that plausibly applied to a record claiming `cold`.
+
+    Advisory by construction. Conventions call a false cold claim a
+    detectable provenance defect, and this is the detection — but a
+    token overlap cannot know whether a rule actually drove anything,
+    so a human confirms before restreaming the draft.
+    """
+    if record.get("prediction_stream") != "cold":
+        return []
+    tokens = record_tokens(record)
+    matches = []
+    for line in rule_lines(preferences_text):
+        rule_tokens = tokenize(line)
+        overlap = tokens & rule_tokens
+        score = jaccard(tokens, rule_tokens)
+        if score >= threshold:
+            matches.append(
+                {
+                    "rule": line,
+                    "overlap_score": round(score, 4),
+                    "shared_terms": sorted(overlap),
+                }
+            )
+    matches.sort(key=lambda match: -match["overlap_score"])
+    return matches
+
+
+def build_report(
+    candidates: list[dict],
+    corpus: list[dict],
+    root: str = ".",
+    threshold: float = DEFAULT_THRESHOLD,
+) -> dict:
+    """The whole gate: pairs, false-cold flags, ref completeness."""
+    pairs = find_pairs(candidates, corpus, threshold)
+
+    false_cold = []
+    current = read_preferences(root)
+    for record in candidates:
+        commit, _ = _provenance(record)
+        pinned = preferences_at(commit, root)
+        text = pinned if pinned is not None else current
+        if not text:
+            continue
+        matches = false_cold_candidates(record, text)
+        if matches:
+            false_cold.append(
+                {
+                    "id": identity(record),
+                    "preference_set_commit": commit,
+                    "compared_against": "pinned" if pinned is not None else "current",
+                    "matches": matches,
+                }
+            )
+
+    tiers = [
+        {"id": identity(record), "tier": ref_tier(record)} for record in candidates
+    ]
+
+    return {
+        "candidates": len(candidates),
+        "corpus": len(corpus),
+        "threshold": threshold,
+        "pairs": pairs,
+        "verdict_counts": {
+            verdict: sum(1 for pair in pairs if pair["verdict"] == verdict)
+            for verdict in VERDICT_ORDER
+        },
+        "false_cold": false_cold,
+        "artifact_ref_tiers": tiers,
+        "tier_counts": {
+            tier: sum(1 for entry in tiers if entry["tier"] == tier)
+            for tier in (REF_COMPLETE, REF_PARTIAL, REF_NULL)
+        },
+    }
+
+
+def read_preferences(root: str = ".") -> str:
+    path = os.path.join(root, PREFERENCES_FILENAME)
+    if not os.path.isfile(path):
+        return ""
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
+
+
+def load_records(root: str = ".") -> list[dict]:
+    directory = os.path.join(root, DECISIONS_DIR)
+    records: list[dict] = []
+    if not os.path.isdir(directory):
+        return records
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith(".json") or name.startswith("."):
+            continue
+        with open(os.path.join(directory, name), encoding="utf-8") as handle:
+            records.append(json.load(handle))
+    return records
+
+
+def load_drafts(path: str) -> list[dict]:
+    """Drafts file: a bare array, or an object with a `drafts` list."""
+    with open(path, encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if isinstance(payload, dict):
+        payload = payload.get("drafts") or payload.get("records") or []
+    if not isinstance(payload, list):
+        raise ValueError(f"{path}: expected a list of drafts")
+    return [entry for entry in payload if isinstance(entry, dict)]
+
+
+def render(report: dict) -> str:
+    lines: list[str] = []
+    counts = report["verdict_counts"]
+    lines.append(
+        f"ingestion gate: {report['candidates']} candidate(s) vs "
+        f"{report['corpus']} record(s) — "
+        + ", ".join(f"{counts[v]} {v}" for v in VERDICT_ORDER)
+    )
+
+    if not report["pairs"]:
+        lines.append("  no pairs above the threshold")
+    for pair in report["pairs"]:
+        lines.append("")
+        corroborated = " +artifact" if pair["artifact_corroborated"] else ""
+        lines.append(
+            f"  [{pair['verdict']}] {pair['score']}{corroborated}  "
+            f"{pair['left']}  vs  {pair['right']} ({pair['right_side']})"
+        )
+        for field, (left, right) in sorted(pair["diffs"].items()):
+            lines.append(f"      {field}: {left!r}  ->  {right!r}")
+
+    lines.append("")
+    if report["false_cold"]:
+        lines.append(f"false-cold? {len(report['false_cold'])} draft(s) to confirm")
+        for entry in report["false_cold"]:
+            lines.append(
+                f"  {entry['id']} (vs {entry['compared_against']} preference set)"
+            )
+            for match in entry["matches"]:
+                lines.append(
+                    f"      {match['overlap_score']}  {match['rule']}\n"
+                    f"          shared: {', '.join(match['shared_terms'])}"
+                )
+    else:
+        lines.append("false-cold? none flagged")
+
+    lines.append("")
+    tier_counts = report["tier_counts"]
+    lines.append(
+        "artifact_ref: "
+        + ", ".join(f"{count} {tier}" for tier, count in tier_counts.items())
+    )
+    for entry in report["artifact_ref_tiers"]:
+        if entry["tier"] != REF_COMPLETE:
+            lines.append(f"  {entry['tier']:<8} {entry['id']}")
+
+    lines.append("")
+    lines.append(
+        "Nothing was written. Duplicates go to discarded-drafts.json (never "
+        "deleted), links and restreams are edits to the DRAFTS — all of it "
+        "impossible once these records are ingested."
+    )
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", default=".", help="store root (default: cwd)")
+    parser.add_argument(
+        "--drafts",
+        help="drafts file to gate; omit to check the store against itself",
+    )
+    parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD)
+    parser.add_argument("--json", action="store_true", dest="as_json")
+    args = parser.parse_args(argv)
+
+    corpus = load_records(args.root)
+    if args.drafts:
+        candidates = load_drafts(args.drafts)
+    else:
+        # No drafts: fold the corpus onto itself so an already-ingested
+        # duplicate still surfaces. Nothing can be fixed at this point,
+        # but knowing is better than not.
+        candidates, corpus = corpus, []
+
+    report = build_report(candidates, corpus, args.root, args.threshold)
+
+    if args.as_json:
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+    else:
+        print(render(report))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -30,6 +30,7 @@ import extraction  # noqa: E402
 import guards  # noqa: E402
 import preferences_guard as guard  # noqa: E402
 import replay  # noqa: E402
+import similarity  # noqa: E402
 
 
 def make_record(record_id, chosen_slot, stream="cold", options=None):
@@ -818,6 +819,229 @@ class ExtractionGateTests(ExtractionWatermarkTests):
         )
         self.assertEqual(errors, [])
         self.assertTrue(any("extraction pass" in note for note in notes))
+
+
+class SimilarityGateTests(unittest.TestCase):
+    """Everything this gate catches is only fixable before ingestion."""
+
+    @staticmethod
+    def _draft(record_id, question, chosen, **overrides):
+        """A record shaped like a real one.
+
+        The chosen option's label carries the ANSWER, not the question —
+        conflating them makes every pair on one question look like it
+        reached the same answer.
+        """
+        record = make_record(record_id, 1)
+        record["question"] = question
+        record["chosen"] = chosen
+        record["options"] = [{"slot": 1, "label": chosen}]
+        record.update(overrides)
+        return record
+
+    def test_unrelated_records_do_not_cluster(self):
+        """A false cluster costs a glance; the threshold must still hold."""
+        left = self._draft("20260715T143205Z-a", "How do agents reach the store?", "x")
+        right = self._draft(
+            "20260716T143205Z-b", "Which wrapping style for prose files?", "y"
+        )
+        self.assertLess(similarity.similarity(left, right), 0.35)
+
+    def test_reworded_same_ruling_is_a_duplicate(self):
+        """Two extraction runs over one session, different wording."""
+        commit = {"commit": "abc123"}
+        left = self._draft(
+            "20260715T143205Z-a",
+            "How are rejection reasons recorded on a silent pick?",
+            "declared provenance enum",
+            preference_set=commit,
+        )
+        right = self._draft(
+            "20260715T143206Z-b",
+            "How are rejection reasons recorded when the decider picks silently?",
+            "declared provenance enum",
+            preference_set=commit,
+        )
+        self.assertGreaterEqual(similarity.similarity(left, right), 0.35)
+        self.assertEqual(similarity.classify(left, right), similarity.DUPLICATE)
+
+    def test_distinct_provenance_is_a_re_decision(self):
+        left = self._draft(
+            "20260715T143205Z-a",
+            "Where do glossary terms live?",
+            "vendored",
+            preference_set={"commit": "aaa"},
+        )
+        right = self._draft(
+            "20270101T120000Z-b",
+            "Where do glossary terms live?",
+            "thin stubs",
+            preference_set={"commit": "bbb"},
+        )
+        self.assertEqual(similarity.classify(left, right), similarity.RE_DECISION)
+
+    def test_an_existing_link_outranks_every_other_verdict(self):
+        left = self._draft(
+            "20260715T143205Z-a",
+            "Where do glossary terms live?",
+            "vendored",
+            preference_set={"commit": "aaa"},
+        )
+        right = self._draft(
+            "20270101T120000Z-b",
+            "Where do glossary terms live?",
+            "thin stubs",
+            preference_set={"commit": "bbb"},
+            supersedes="20260715T143205Z-a",
+        )
+        self.assertEqual(similarity.classify(left, right), similarity.LINKED)
+
+    def test_missing_provenance_with_different_answers_is_uncertain(self):
+        """Chat drafts carry null provenance by design — absence is not
+        evidence of distinctness, so this needs a human."""
+        left = self._draft("20260715T143205Z-a", "Same question?", "one", session=None)
+        right = self._draft("20260715T143206Z-b", "Same question?", "two", session=None)
+        self.assertEqual(similarity.classify(left, right), similarity.UNCERTAIN)
+
+    def test_artifact_corroboration_lifts_a_borderline_pair(self):
+        ref = {"repo": "r", "path": "docs/conventions.md", "commit": None}
+        left = self._draft("20260715T143205Z-a", "How is wrapping handled?", "sembr")
+        right = self._draft("20260716T143205Z-b", "How is wrapping decided?", "sembr")
+        bare = similarity.similarity(left, right)
+        left["artifact_ref"] = dict(ref)
+        right["artifact_ref"] = dict(ref)
+        self.assertGreater(similarity.similarity(left, right), bare)
+
+    def test_a_differing_artifact_does_not_corroborate(self):
+        left = self._draft("20260715T143205Z-a", "q", "x")
+        right = self._draft("20260716T143205Z-b", "q", "x")
+        left["artifact_ref"] = {"repo": "r", "path": "a.md"}
+        right["artifact_ref"] = {"repo": "r", "path": "b.md"}
+        self.assertFalse(similarity.artifact_corroborates(left, right))
+
+    def test_a_reworded_answer_still_reads_as_agreement(self):
+        """Two extractions of one ruling reword freely; exact equality
+        would call every reworded duplicate a different answer."""
+        left = self._draft(
+            "20260715T143205Z-a",
+            "Which artifacts enter first?",
+            "start only with skills that have mechanical oracles",
+        )
+        right = self._draft(
+            "20260715T143206Z-b",
+            "Which skills enter first?",
+            "start only with skills that have mechanical oracles",
+        )
+        right["chosen"] = "mechanical-oracle artifacts first; the logger is the seed"
+        self.assertTrue(similarity.answers_agree(left, right))
+
+    def test_the_chosen_slot_number_is_never_compared(self):
+        """Two runs ordering the options differently give one ruling
+        different slot numbers — seen in real data as slot 1 vs slot 3."""
+        answer = "both: write-time best-effort, compaction authoritative"
+        left = self._draft(
+            "20260715T143205Z-a", "Where does enforcement happen?", answer
+        )
+        right = self._draft(
+            "20260715T143206Z-b", "Where does enforcement happen?", answer
+        )
+        right["chosen_slot"] = 3
+        right["options"] = [
+            {"slot": 1, "label": "at write time"},
+            {"slot": 2, "label": "at compaction"},
+            {"slot": 3, "label": answer},
+        ]
+        self.assertTrue(similarity.answers_agree(left, right))
+
+    def test_a_label_is_never_compared_against_prose(self):
+        """The cross-match must not fire.
+
+        Here left's PROSE equals right's LABEL, and nothing else
+        matches. Comparing across kinds would score 1.0 and call two
+        unrelated answers agreement; like-with-like scores 0 twice.
+        """
+        left = self._draft("20260715T143205Z-a", "Same question?", "beta")
+        left["options"] = [{"slot": 1, "label": "alpha"}]
+        right = self._draft("20260715T143206Z-b", "Same question?", "gamma")
+        right["options"] = [{"slot": 1, "label": "beta"}]
+        self.assertFalse(similarity.answers_agree(left, right))
+
+    def test_pairs_rank_worst_first(self):
+        commit = {"commit": "abc"}
+        drafts = [
+            self._draft(
+                "20260715T143205Z-a", "How is X decided?", "same", preference_set=commit
+            ),
+            self._draft(
+                "20260715T143206Z-b",
+                "How is X decided again?",
+                "same",
+                preference_set=commit,
+            ),
+            self._draft(
+                "20260715T143207Z-c",
+                "How is X decided?",
+                "other",
+                preference_set={"commit": "zzz"},
+            ),
+        ]
+        pairs = similarity.find_pairs(drafts, [])
+        self.assertTrue(pairs)
+        verdicts = [pair["verdict"] for pair in pairs]
+        self.assertEqual(verdicts[0], similarity.DUPLICATE)
+
+    def test_diffs_name_the_fields_a_human_must_adjudicate(self):
+        left = self._draft("20260715T143205Z-a", "q", "one")
+        right = self._draft("20260715T143206Z-b", "q", "two")
+        diffs = similarity.field_diffs(left, right)
+        self.assertEqual(diffs["chosen"], ["one", "two"])
+        self.assertNotIn("question", diffs)
+
+    def test_false_cold_flags_a_matching_active_rule(self):
+        preferences = (
+            "# Active Preference Set\n\n"
+            "- Rejects new infrastructure dependencies unless they remove an "
+            "entire class of maintenance. [confirmed: 3, last: 2026-07-15]\n"
+        )
+        record = self._draft(
+            "20260715T143205Z-a",
+            "Do we add a new infrastructure dependency to remove a maintenance class?",
+            "no",
+            prediction_stream="cold",
+        )
+        matches = similarity.false_cold_candidates(record, preferences)
+        self.assertTrue(matches)
+        self.assertIn("infrastructure", matches[0]["shared_terms"])
+
+    def test_a_preference_driven_record_is_never_false_cold(self):
+        record = self._draft("20260715T143205Z-a", "infrastructure dependency?", "no")
+        record["prediction_stream"] = "preference-driven"
+        self.assertEqual(
+            similarity.false_cold_candidates(record, "- infrastructure"), []
+        )
+
+    def test_ref_tiers(self):
+        self.assertEqual(
+            similarity.ref_tier(
+                {"artifact_ref": {"repo": "r", "path": "p", "commit": "c"}}
+            ),
+            similarity.REF_COMPLETE,
+        )
+        self.assertEqual(
+            similarity.ref_tier({"artifact_ref": {"repo": "r", "path": "p"}}),
+            similarity.REF_PARTIAL,
+        )
+        self.assertEqual(
+            similarity.ref_tier({"artifact_ref": None}), similarity.REF_NULL
+        )
+
+    def test_report_is_read_only_and_complete(self):
+        drafts = [self._draft("20260715T143205Z-a", "q", "x")]
+        with tempfile.TemporaryDirectory() as tmp:
+            report = similarity.build_report(drafts, [], tmp)
+        for key in ("pairs", "verdict_counts", "false_cold", "artifact_ref_tiers"):
+            self.assertIn(key, report)
+        self.assertEqual(report["candidates"], 1)
 
 
 class CommitTypeTests(unittest.TestCase):

@@ -204,6 +204,30 @@ everywhere — new optional fields need no migration.
   human `pref-promote` commit moves content into `preferences.md`.
   Merging a proposal file is NOT promotion.
 
+## Ingestion gate
+
+Drafts are mutable; records are not. Everything below is fixable only
+before ingestion, so `.github/store/similarity.py` runs over the drafts
+plus the store first:
+
+- **Duplicates** — the same ruling extracted twice (two runs over one
+  session) would mint two immutable records for one decision. Classified
+  by provenance: same `preference_set.commit` + same `chosen`. The
+  remedy is discarding one to `discarded-drafts.json`, never deleting.
+- **Re-decisions** — a `related`/`supersedes` edge cannot be added after
+  ingestion without violating append-only, so ingestion is the ONLY
+  moment an edge can be written.
+- **False cold** — `preference_set.commit` content-addresses the active
+  set precisely so a false cold claim is a detectable provenance defect;
+  the gate runs that check against the pinned set. Advisory, human
+  confirms, and a confirmed one is restreamed in the draft.
+- **`artifact_ref` completeness** — chat-extracted drafts carry
+  null/partial refs by design and are enriched here, once the commits
+  exist. SHAs are never guessed.
+
+The gate reports and never writes. Details in
+[.github/store/README.md](../.github/store/README.md).
+
 ## Preference-set lifecycle
 
 The active set is grown by extraction and shrunk by compaction, in

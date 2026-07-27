@@ -27,6 +27,7 @@ STORE_FILES = frozenset(
         ".github/store/extraction.py",
         ".github/store/preferences_guard.py",
         ".github/store/replay.py",
+        ".github/store/similarity.py",
         ".github/store/tests/test_store.py",
         ".github/workflows/preferences-budget.yml",
         ".github/workflows/preferences-guard.yml",

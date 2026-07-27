@@ -53,6 +53,20 @@ authoritative contract.
   (PR creation etc.) — `gh`/`curl` are typically sabotaged there. The
   recorder's `submit` hands the PR off to you in that case.
 
+## Before ingesting drafts
+
+Run the ingestion gate over the drafts and the store:
+
+```bash
+python .github/store/similarity.py --drafts <drafts.json>
+```
+
+`decisions/` is append-only, so duplicates, missing re-decision links,
+false cold claims and unenriched `artifact_ref`s are all fixable ONLY
+while the drafts are still drafts. The gate reports; you act on the
+drafts before the recorder ingests them. See
+[docs/conventions.md](docs/conventions.md) § Ingestion gate.
+
 ## Preference-set lifecycle
 
 `preferences.md` is injected into every grilled session, so every rule

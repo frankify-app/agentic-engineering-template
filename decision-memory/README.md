@@ -36,7 +36,8 @@ protecting the data's integrity.
 └── .github/
     ├── workflows/          # record guards, budget report, PR gate
     ├── guards/             # copier-vendored record guard + validator
-    └── store/              # copier-vendored preference-set lifecycle
+    └── store/              # copier-vendored: ingestion gate +
+                            # preference-set lifecycle
 ```
 
 (`proposals/` and `decisions/` materialize with their first files.)

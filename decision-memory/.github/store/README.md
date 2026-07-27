@@ -217,6 +217,54 @@ Cross-session repetition is the evidence a single session cannot see,
 and it stays available: a pattern appearing once in the scope and twice
 in history is a three-record pattern.
 
+## Ingestion gate
+
+`similarity.py` runs over a drafts file plus the store, BEFORE
+ingestion:
+
+```bash
+python .github/store/similarity.py --drafts drafts.json
+python .github/store/similarity.py --drafts drafts.json --json
+python .github/store/similarity.py            # store against itself
+```
+
+Everything it checks shares one deadline: **drafts are mutable and
+records are not.** `decisions/` is append-only with no carve-out, so
+whatever is not fixed at ingestion is frozen permanently. That is what
+separates this gate from the analysis passes, which read immutable
+history and can run whenever.
+
+Three checks, one run:
+
+- **Dedup.** Two extraction runs over one session produce the same
+  ruling twice, worded differently. Ingesting both mints two immutable
+  records for one decision.
+- **Re-decision links.** A `related`/`supersedes` edge cannot be added
+  after ingestion without violating append-only, so ingestion is the
+  only moment an edge can be written. An unlinked re-decision is a
+  permanently disconnected node.
+- **False cold + ref completeness.** A record claiming `cold` while a
+  matching rule was active permanently understates that rule's
+  evidence — and the replay gate's stream split reads exactly that
+  field. A null `artifact_ref` that could have been filled stays null.
+
+Pairs are classified by **provenance**, which is what separates "one
+ruling recorded twice" from "the same question decided again later":
+
+| Verdict | When | What a human does |
+| --- | --- | --- |
+| `duplicate` | same `preference_set.commit`, same `chosen` | discard one to `discarded-drafts.json` — never delete |
+| `re-decision` | distinct provenance, no link | add the `related`/`supersedes` edge to the draft |
+| `uncertain` | provenance missing on either side | adjudicate |
+| `linked` | an edge already exists | informational |
+
+Chat-extracted drafts carry null provenance by design, so absence is
+never read as "distinct" — it falls back to the session key, then to
+the answer, and lands in `uncertain` rather than guessing.
+
+**The gate never writes.** Every remedy above is a judgement call; the
+tool's job is to make sure the call gets made while it still can be.
+
 ## Tests
 
 ```bash
