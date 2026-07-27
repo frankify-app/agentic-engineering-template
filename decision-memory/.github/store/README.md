@@ -42,22 +42,25 @@ empty, and the compaction gate has nothing to measure.
 `store.config.json`, at the repo root — the one place a human adjusts
 these knobs:
 
-| key | default | meaning |
-| --- | --- | --- |
-| `budget_tokens` | 2000 | hard budget for `preferences.md` |
-| `warn_at_percent` | 80 | "compression due" threshold |
-| `carve_out_label` | `preferences-carve-out` | label permitting edits to existing lines |
-| `budget_issue_label` | `preferences-budget` | label on the automated budget issue |
-| `replay_waiver_label` | `preferences-replay-waiver` | label accepting an `insufficient-evidence` gate |
-| `replay_window` | 20 | how many recent decisions the replay scores |
-| `min_gated_cases` | 8 | below this many preference-driven cases the gate reports `insufficient-evidence` |
-| `similarity_threshold` | 0.35 | below this a pair is not worth a human's attention |
-| `containment_threshold` | 0.5 | the split channel: one draft re-extracted as two |
-| `artifact_boost` | 0.15 | how much repo+path agreement lifts a borderline pair |
-| `answer_agreement` | 0.5 | how close two rewordings must be to count as one answer |
-| `false_cold_threshold` | 0.4 | rule coverage that flags a suspect `cold` record |
-| `calibration_growth_factor` | 2.0 | corpus growth past a stamp before it reads as stale |
-| `calibration` | `{}` | evidence behind each calibrated constant |
+Defaults live in `config.DEFAULTS` and are not repeated here — one
+authority, so this table cannot drift out of step with the code.
+
+| key | meaning |
+| --- | --- |
+| `budget_tokens` | hard budget for `preferences.md` |
+| `warn_at_percent` | "compression due" threshold |
+| `carve_out_label` | label permitting edits to existing lines |
+| `budget_issue_label` | label on the automated budget issue |
+| `replay_waiver_label` | label accepting an `insufficient-evidence` gate |
+| `replay_window` | how many recent decisions the replay scores |
+| `min_gated_cases` | below this many preference-driven cases the gate reports `insufficient-evidence` |
+| `similarity_threshold` | below this a pair is not worth a human's attention |
+| `containment_threshold` | the split channel: one draft re-extracted as two |
+| `artifact_boost` | how much repo+path agreement lifts a borderline pair |
+| `answer_agreement` | how close two rewordings must be to count as one answer |
+| `false_cold_threshold` | rule coverage that flags a suspect `cold` record |
+| `calibration_growth_factor` | corpus growth past a stamp before it reads as stale |
+| `calibration` | evidence behind each calibrated constant |
 
 A missing file is fine — the defaults are the contract. Unknown keys
 are tolerated (`_comment` is one), invalid values fail loudly.

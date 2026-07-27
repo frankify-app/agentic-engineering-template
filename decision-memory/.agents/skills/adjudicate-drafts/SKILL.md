@@ -1,6 +1,6 @@
 ---
 name: adjudicate-drafts
-description: Work the ingestion gate's clusters into a decision the human can make in one pass — propose a resolution per cluster, lay out what each way costs, and name what becomes irreversible. Use after running the ingestion gate, when drafts are flagged duplicate/re-decision/uncertain, or when a drafts batch is about to be ingested.
+description: Resolve the ingestion gate's flagged draft clusters before ingestion. Use when drafts are flagged duplicate, re-decision or uncertain, or before ingesting a drafts batch.
 ---
 
 # Adjudicating flagged drafts before ingestion
@@ -9,99 +9,67 @@ description: Work the ingestion gate's clusters into a decision the human can ma
 > subtemplate — do NOT edit it in the store repo;
 > change it in the template and pull via `copier update`.
 
-The ingestion gate finds clusters.
-It deliberately does not resolve them:
-every resolution trades one loss against another,
-and picking the trade is the human's job.
+The gate finds clusters and does not resolve them. This skill turns
+each cluster into a decision the human answers in one pass.
 
-This skill is the bridge.
-It turns each cluster into a **decision with its implications laid out**,
-so the human answers rather than investigates.
+`decisions/` is append-only with no carve-out: after ingestion a
+duplicate cannot be withdrawn and a missing link cannot be added.
 
-**Why the deadline is real.**
-`decisions/` is append-only with no carve-out.
-Once ingested, a duplicate cannot be withdrawn,
-a missing link cannot be added,
-and a wrong resolution is permanent.
-Every option below is available exactly once.
+A duplicate is not just a wasted file. Extraction reads cross-record
+repetition as evidence that a pattern is a principle, so one ruling
+recorded twice manufactures that evidence, and the replay harness
+scores the case twice.
 
-**Why it is not cosmetic.**
-An undetected duplicate does not merely waste a file —
-it **double-counts as evidence**.
-Extraction reads cross-record repetition as the signal that a pattern
-is a principle rather than a one-off,
-so one ruling recorded twice manufactures the exact evidence the
-preference set is supposed to earn.
-The replay harness then scores the same case twice.
+## Rules
 
-## What you do NOT do
+- Never edit `decisions/`. Everything here happens in the drafts.
+- Never delete a draft. Discards move to `discarded-drafts.json`.
+- Never leave a cluster unresolved. "Genuinely independent" is a
+  resolution; silence is not.
+- Never pick for the human on a judgement call — `uncertain` means the
+  tool could not tell. Propose with costs.
 
-- **Never edit `decisions/`.** Everything here happens in the drafts.
-- **Never delete a draft.** Discards move to `discarded-drafts.json`,
-  which keeps the record of what was rejected and why.
-- **Never resolve silently.** Every cluster gets a stated resolution,
-  including "these are genuinely independent" — that is a finding, not
-  a non-answer.
-- **Never pick for the human on a judgement call.** Propose, with the
-  cost of each way. `uncertain` exists because the tool could not tell;
-  inheriting that uncertainty and hiding it is worse than surfacing it.
-
-## Procedure
-
-### 1. Run the gate
+## 1. Run the gate
 
 ```bash
-python .github/store/similarity.py --drafts <drafts.json> --json --out /tmp/gate.json
+python .github/store/similarity.py --drafts <drafts.json> --out /tmp/gate.json
 python .github/store/similarity.py --drafts <drafts.json>
 ```
 
-Work the clusters in the order the gate ranks them: `duplicate`,
-`re-decision`, `uncertain`, `linked`. A `linked` cluster is
-informational — confirm the existing edge points the right way and move
-on.
+Work clusters in the gate's order: `duplicate`, `re-decision`,
+`uncertain`, `linked`. A `linked` cluster is informational — confirm
+the edge points the right way and move on.
 
-Note how each pair surfaced. A pair surfaced by **containment** rather
-than similarity is the signature of a **split**: one draft
-re-extracted as two. Check whether a third draft covers the rest of the
-bundle, because pairwise comparison will not tell you.
+A pair surfaced by **containment** rather than similarity signals a
+**split**: one draft re-extracted as two. Check whether a third draft
+covers the rest of the bundle — pairwise comparison will not tell you.
 
-### 2. Read both drafts fully
+## 2. Read both drafts
 
-The gate's field diff is a pointer, not a summary. Before proposing
-anything, know for each side:
+The gate's field diff is a pointer, not a summary. Per side:
 
-- **The operative reason and its source.** A `stated` reason is the
-  decider's own words and the highest-value field in the record.
-  `inferred` is the model's guess. Discarding the side that carries the
+- **Operative reason and its source.** `stated` is the decider's own
+  words, `inferred` is the model's guess. Discarding the side with the
   only stated reason destroys evidence the other side never had.
 - **`artifact_ref` completeness.** Complete beats partial beats null,
-  and this is the last moment enrichment is possible.
-- **Rejection depth.** More rejections with `operative` status means
-  more recoverable reasoning.
-- **Links already written.** `related_slugs`, `supersedes_slug`,
-  `drill_down_of_slug` — a draft embedded in a graph costs more to
-  discard than an isolated one.
-- **Scope.** Two drafts of one ruling often differ in how much they
-  claim. The wider one may be a genuine refinement rather than a
-  restatement.
+  and this is the last moment to enrich it.
+- **Rejection depth.** More `operative` rejections, more recoverable
+  reasoning.
+- **Links already written** — `related_slugs`, `supersedes_slug`,
+  `drill_down_of_slug`.
+- **Scope.** The wider draft may be a refinement, not a restatement.
 
-### 3. Propose a resolution, with its cost
+## 3. Propose a resolution with its cost
 
-Per cluster, write the human a block they can answer without opening
-the files. Name the resolution, then what it costs, then what it makes
-permanent.
-
-The resolutions available:
-
-| Resolution | When | What it costs |
+| Resolution | When | Cost |
 | --- | --- | --- |
-| **Keep one, discard the other** | Same ruling, one side strictly richer | Whatever the discarded side held that the kept side does not — check the stated reason first |
-| **Keep both, add a link** | Distinct rulings that inform each other, or a genuine re-decision | Nothing, if the edge direction is right; a wrong direction is permanent |
-| **Keep both, no link** | Genuinely independent despite the overlap | A missed edge, permanently — the graph stays disconnected |
-| **Merge into one draft** | Each side carries something the other lacks | Hand-writing a draft that is faithful to both; the two originals go to `discarded-drafts.json` |
-| **Split is real** | One draft covers what two others cover separately | Deciding which granularity is the record — the bundle or the parts, not both |
+| Keep one, discard the other | Same ruling, one side strictly richer | Whatever the discarded side held — check the stated reason first |
+| Keep both, add a link | Distinct rulings that inform each other, or a real re-decision | A wrong edge direction is permanent |
+| Keep both, no link | Genuinely independent | A permanently missed edge |
+| Merge into one draft | Each side carries something the other lacks | Hand-writing a faithful draft; both originals discarded |
+| Split is real | One draft covers what two others cover separately | Choosing which granularity is the record — bundle or parts, not both |
 
-Write it in this shape:
+Write each cluster so the human can answer without opening the files:
 
 ```markdown
 ### «left-slug» ~ «right-slug» — «verdict» «score»
@@ -110,60 +78,55 @@ Write it in this shape:
 
 **Proposed:** keep «right-slug», discard «left-slug».
 
-**Why that direction:** «right-slug» carries a stated operative reason
-(«quote»); «left-slug» has only inferred rejections. Both have a null
-artifact_ref.
+**Why:** «right-slug» has a stated operative reason («quote»);
+«left-slug» has only inferred rejections. Both `artifact_ref` null.
 
-**What it costs:** «left-slug»'s «field» is not represented in
-«right-slug» — «what is lost».
+**Cost:** «left-slug»'s «field» is not represented in «right-slug».
 
-**Irreversible after ingestion:** the discard, and the absence of a
-`related` edge between them.
+**Irreversible after ingestion:** the discard, and the absent
+`related` edge.
 
-**The other way:** keep both linked if «the reason someone might».
+**The other way:** keep both linked if «reason».
 ```
 
-State a recommendation. A list of options with no position is work
-handed back, not a decision made easy.
+State a recommendation. Options with no position is work handed back.
 
-### 4. Apply what the human decides
+## 4. Apply the decision
 
 In the **drafts**, never the store:
 
 - Discards move to `discarded-drafts.json` in the same directory, with
-  a `discarded_because` field naming the surviving slug and the
-  reason. Never delete.
-- Links go in as the batch-local slug forms — `related_slugs`,
+  a `discarded_because` naming the surviving slug and the reason.
+- Links go in as batch-local slugs — `related_slugs`,
   `supersedes_slug`, `drill_down_of_slug` — which the recorder resolves
   to IDs at ingestion.
-- Merges are hand-written; both originals go to
-  `discarded-drafts.json` pointing at the merged slug.
+- Merges are hand-written; both originals are discarded, pointing at
+  the merged slug.
 
-### 5. Re-run the gate
+## 5. Re-run the gate
 
 ```bash
 python .github/store/similarity.py --drafts <drafts.json>
 ```
 
-Every cluster should now be `linked`, or gone. A cluster still reading
-`duplicate` or `uncertain` is unresolved, and ingesting over it is the
-one thing that cannot be undone.
+Every cluster should now read `linked`, or be gone. Anything still
+`duplicate` or `uncertain` is unresolved.
 
-Then handle the other two sections while the drafts are still mutable:
+Then, while the drafts are still mutable:
 
 - **`false-cold?`** — confirm or dismiss each flag. A confirmed false
-  cold is restreamed in the draft: `prediction_stream` becomes
-  `preference-driven` and `rules_cited` names the rule. Dismiss the
-  rest; a rule sharing vocabulary is not a rule that drove anything.
-- **`artifact_ref` tiers** — enrich every `partial` and `null` where
-  the artifact now exists. Never guess a SHA; a partial ref with a real
+  cold gets `prediction_stream: preference-driven` and `rules_cited`
+  naming the rule. Dismiss the rest: a rule sharing vocabulary is not a
+  rule that drove anything.
+- **`artifact_ref` tiers** — enrich every `partial` and `null` whose
+  artifact now exists. Never guess a SHA; a partial ref with a real
   repo and path beats a fabricated commit.
 
 ## Afterwards
 
-Ingest through the recorder as normal. The records are immutable from
-that moment, which is the whole reason this pass exists.
+Ingest through the recorder. The records are immutable from that
+moment.
 
-If adjudicating produced a ruling worth remembering — a policy on when
-two extractions count as one decision, say — that is a decision like
-any other and belongs in a grilling session, not in this pass.
+A ruling worth remembering from this pass — a policy on when two
+extractions count as one decision, say — is a decision like any other
+and belongs in a grilling session, not here.

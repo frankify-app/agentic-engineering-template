@@ -184,7 +184,7 @@ everywhere — new optional fields need no migration.
 ## Active preference set (`preferences.md`)
 
 - Hard token budget, CI-enforced. The number is `budget_tokens` in the
-  store-owned `store.config.json` (default ~2k); the vendored guard
+  store-owned `store.config.json`; the vendored guard
   reads that value, so the budget is checked in exactly one place
   against exactly one authority. Promoting a rule at budget means
   merging or demoting another ("promote requires demote").

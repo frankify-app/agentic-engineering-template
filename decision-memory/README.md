@@ -53,7 +53,7 @@ protecting the data's integrity.
   records.
 - **Preferences:** `preferences.md` is the active preference set — the
   only file injected into agent sessions, kept under a hard token
-  budget (`budget_tokens` in `store.config.json`, default ~2k).
+  budget (`budget_tokens` in `store.config.json`).
   Confirmation counters on each rule are the one sanctioned routine
   edit; everything else goes through the lifecycle below.
 - **Proposals:** agents write candidate rules to `proposals/` (one

@@ -68,7 +68,12 @@ while the drafts are still drafts.
 The gate finds clusters and deliberately does not resolve them — every
 resolution trades one loss against another. **`/adjudicate-drafts`**
 turns each cluster into a decision with its implications laid out, so
-the call is one answer rather than an investigation. Then ingest.
+the call is one answer rather than an investigation.
+
+Then ingest. Each surviving draft becomes **one record file and one
+commit** — `record.py record` does the split, so a batch is never one
+bulk commit. That is what makes partial acceptance possible: a reviewer
+drops or reverts individual commits before merge.
 
 The gate's thresholds are calibration, not settings: each is a claim
 about where this store's corpus separates, and it expires as the
