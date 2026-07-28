@@ -1,0 +1,24 @@
+name: Guards
+
+# Copier-vendored from the agentic-engineering-template evidence
+# subtemplate. Protects the evidence store: append-only records and
+# full contract validation. Stdlib Python only — no dependencies to
+# install.
+#
+# Evidence records auto-merge on green, so this workflow is the review.
+
+on:
+  pull_request:
+
+jobs:
+  guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # Full history: the guard diffs against the PR base.
+          fetch-depth: 0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.13"
+      - run: python .github/guards/guards.py --base "${{ github.event.pull_request.base.sha }}"
