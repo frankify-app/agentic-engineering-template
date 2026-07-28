@@ -255,3 +255,49 @@ def test_the_writer_requires_a_slug() -> None:
 def test_the_writer_keeps_unknown_draft_fields(tmp_path: Path) -> None:
     record = capture.draft_to_record({**draft(), "future_field": "kept"}, NOW)
     assert record["future_field"] == "kept"
+
+
+# ------------------ the tier-2 ticket-filing window ------------------
+
+
+def test_a_tier_two_record_may_mint_before_its_ticket_exists() -> None:
+    """The tier-2 ticket is filed only after a human approves the
+    capsule, so the record necessarily predates it. That intermediate
+    state is a valid RECORD; the guard is what refuses to merge it."""
+    record = capture.draft_to_record({**draft(), "tier": 2, "ticket": None}, NOW)
+    assert validator.validate_record(record) == []
+
+
+def test_a_tier_one_record_may_not_mint_without_its_ticket() -> None:
+    """Tier 1 has no approval step to wait for — its capsule is public,
+    so the ticket is filed at detection."""
+    record = capture.draft_to_record({**draft(), "tier": 1, "ticket": None}, NOW)
+    assert any(e.startswith("ticket:") for e in validator.validate_record(record))
+
+
+def test_the_ticket_must_still_be_a_url_when_present() -> None:
+    for tier in (1, 2):
+        record = capture.draft_to_record(
+            {**draft(), "tier": tier, "ticket": "see slack"}, NOW
+        )
+        assert any(e.startswith("ticket:") for e in validator.validate_record(record))
+
+
+def test_the_ticket_key_must_be_present_even_when_null() -> None:
+    """Null is a declaration that the ticket is pending; a missing key
+    is an omission. The contract distinguishes them."""
+    record = capture.draft_to_record({**draft(), "tier": 2}, NOW)
+    del record["ticket"]
+    assert any(e.startswith("ticket:") for e in validator.validate_record(record))
+
+
+def test_a_null_ticket_blocks_the_merge_gate() -> None:
+    """Valid as a record, not mergeable as a corpus: every record in the
+    store names its forge ticket, or the store and the backlog drift."""
+    record = capture.draft_to_record({**draft(), "tier": 2, "ticket": None}, NOW)
+    errors = validator.check_tickets_filed({record["id"]: record})
+    assert len(errors) == 1
+    assert "ticket" in errors[0]
+
+    filed = {**record, "ticket": "https://github.com/pandoscope/ghx/issues/1"}
+    assert validator.check_tickets_filed({filed["id"]: filed}) == []
