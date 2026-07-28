@@ -6,12 +6,15 @@ agentic_subtemplate:
     `decision-memory` stamps a decision-memory STORE — the recorder, the
     CI guards (validator + guard runner + workflow), the preference-set
     lifecycle (budget, carve-out gate, replay, compaction skill), the
-    vendored store docs, and a seeded preference set. With
-    `decision-memory`, all project-scaffold questions are skipped,
-    keeping the store's answers file minimal.
+    vendored store docs, and a seeded preference set;
+    `evidence-memory` stamps an evidence STORE — the capture writer, the
+    CI guards (validator + guard runner + workflow), and the vendored
+    store docs. With either store subtemplate, all project-scaffold
+    questions are skipped, keeping the store's answers file minimal.
   choices:
     - template
     - decision-memory
+    - evidence-memory
   default: template
 
 agentic_project_name:
