@@ -23,6 +23,7 @@ STORE_FILES = frozenset(
         ".copier-answers.agentic.yml",
         ".github/guards/decision_validator.py",
         ".github/guards/guards.py",
+        ".github/guards/validator_core.py",
         ".github/store/README.md",
         ".github/store/budget.py",
         ".github/store/config.py",
