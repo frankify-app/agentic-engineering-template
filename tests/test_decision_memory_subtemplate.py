@@ -43,6 +43,7 @@ STORE_FILES = frozenset(
         "preferences.md",
         "store.config.json",
         "tools/record.py",
+        "tools/record_core.py",
     }
 )
 

@@ -43,8 +43,10 @@ session's PR to that session's own records. Where cloning is
 impossible, run the copy inside whatever store checkout is available
 — same invariant, no special flag.
 
-Stdlib only. The file is split into a pure CONTRACT CORE (the dojo
-lift-target) and an IO SHELL; keep the seam strict.
+Stdlib only. The universal half of the contract lives in
+``record_core.py``, shared with every other store's writer; what stays
+here is this store's own policy and its IO SHELL. Keep the seam
+strict.
 """
 
 from __future__ import annotations
@@ -60,21 +62,31 @@ import subprocess
 import sys
 from pathlib import Path
 
-# ========================== contract core ==========================
-# Pure functions, no IO — the functions a future dojo package lifts
-# verbatim. Validation is deliberately NOT defined here:
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import record_core  # noqa: E402  (path bootstrap above)
+
+# ======================= store record policy ========================
+# The universal contract — envelope grammar, ID minting, field
+# ordering, serialization, batch-ref resolution — lives in
+# record_core.py, one copy shared by every store's writer. It is
+# re-exported here so this module's public surface is unchanged.
 # DECISION: the validator is imported from the data-repo clone's
 # vendored copy (single copier-vendored source shared with CI), so
-# writer-side and CI validation cannot drift.
+# writer-side and CI validation cannot drift. That is why validation
+# is defined neither here nor in the core.
 
-# Mint-side mirror of the envelope/ID grammar. The vendored
-# decision_validator in the store checkout stays authoritative —
-# minted records are re-validated against it; these constants only
-# make minting fail fast with better messages.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = record_core.SCHEMA_VERSION
+MAX_SLUG_LENGTH = record_core.MAX_SLUG_LENGTH
+SLUG_RE = record_core.SLUG_RE
+
+mint_id = record_core.mint_id
+serialize_record = record_core.serialize_record
+resolve_batch_refs = record_core.resolve_batch_refs
+
+# What makes a record from this store a decision rather than any other
+# kind sharing the envelope.
 RECORD_TYPE = "decision"
-MAX_SLUG_LENGTH = 40
-SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 # Replay-ready order: envelope, then input side (pre-ruling), then
 # output side (post-ruling), then links. Unknown fields keep their
@@ -106,23 +118,9 @@ FIELD_ORDER = (
 )
 
 
-def mint_id(slug: str, now: dt.datetime) -> str:
-    """Mint a record ID: <UTC timestamp>Z-<slug>."""
-    if not SLUG_RE.match(slug):
-        raise ValueError(f"slug {slug!r} must be lowercase kebab-case ([a-z0-9-])")
-    if len(slug) > MAX_SLUG_LENGTH:
-        raise ValueError(f"slug {slug!r} is {len(slug)} chars (max {MAX_SLUG_LENGTH})")
-    timestamp = now.astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return f"{timestamp}-{slug}"
-
-
 def mint_envelope(slug: str, now: dt.datetime) -> dict:
-    """Mint the universal envelope: v, type, id."""
-    return {
-        "v": SCHEMA_VERSION,
-        "type": RECORD_TYPE,
-        "id": mint_id(slug, now),
-    }
+    """Mint this store's envelope: v, type, id."""
+    return record_core.mint_envelope(slug, now, RECORD_TYPE)
 
 
 def draft_to_record(
@@ -153,68 +151,7 @@ def draft_to_record(
         merged["preference_set"] = preference_set
     merged.update(payload)
 
-    record = {key: merged[key] for key in FIELD_ORDER if key in merged}
-    for key, value in merged.items():
-        if key not in record:
-            record[key] = value
-    return record
-
-
-def serialize_record(record: dict) -> str:
-    """Serialize a record for its immutable decisions/<id>.json file."""
-    return json.dumps(record, ensure_ascii=False, indent=2) + "\n"
-
-
-def resolve_batch_refs(drafts: list, now: dt.datetime) -> list:
-    """Resolve batch-local slug references to minted IDs.
-
-    Drafts extracted from one conversation cannot know each other's
-    final IDs, so cross-draft links name their target by slug:
-    ``supersedes_slug`` and ``drill_down_of_slug`` (single),
-    ``related_slugs`` (list, appended to any repo-ID ``related``
-    entries). This maps every reference to the ID the batch will mint
-    (order-independent). Raises ValueError on unknown slugs or when a
-    draft carries both a slug reference and its resolved field.
-    """
-    minted = {}
-    for d in drafts:
-        slug = d.get("slug")
-        if isinstance(slug, str) and SLUG_RE.match(slug):
-            minted[slug] = mint_id(slug, now)
-
-    def resolve(draft_slug, ref):
-        if ref not in minted:
-            raise ValueError(
-                f"draft {draft_slug!r}: batch reference {ref!r} matches "
-                "no slug in this batch"
-            )
-        return minted[ref]
-
-    resolved = []
-    for d in drafts:
-        d = dict(d)
-        for slug_field, target in (
-            ("supersedes_slug", "supersedes"),
-            ("drill_down_of_slug", "drill_down_of"),
-        ):
-            ref = d.pop(slug_field, None)
-            if ref is not None:
-                if d.get(target):
-                    raise ValueError(
-                        f"draft {d.get('slug')!r}: both {target} and "
-                        f"{slug_field} given — use one"
-                    )
-                d[target] = resolve(d.get("slug"), ref)
-        refs = d.pop("related_slugs", None)
-        if refs is not None:
-            if not isinstance(refs, list):
-                raise ValueError(
-                    f"draft {d.get('slug')!r}: related_slugs must be a list"
-                )
-            existing = d.get("related") or []
-            d["related"] = existing + [resolve(d.get("slug"), r) for r in refs]
-        resolved.append(d)
-    return resolved
+    return record_core.order_fields(merged, FIELD_ORDER)
 
 
 # ============================ IO shell =============================
