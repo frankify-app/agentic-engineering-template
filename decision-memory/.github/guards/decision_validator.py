@@ -16,14 +16,29 @@ working, only updates stop).
 All validators return a list of human-readable error strings (empty =
 valid) and TOLERATE unknown fields: new optional fields need no
 migration.
+
+The store-independent half — ID grammar, envelope, required-field
+presence, corpus link integrity — lives in ``validator_core.py`` next
+to this file and is shared with every other store's validator. What
+stays here is the decision contract itself.
 """
 
 from __future__ import annotations
 
+import os
 import re
+import sys
 
-SCHEMA_VERSION = 1
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import validator_core  # noqa: E402  (path bootstrap above)
+
+SCHEMA_VERSION = validator_core.SCHEMA_VERSION
 RECORD_TYPE = "decision"
+
+# The store's own link vocabulary, walked by the corpus check.
+LINK_FIELDS = ("related", "supersedes", "drill_down_of")
+STORE_DIR = "decisions"
 
 REQUIRED_FIELDS = (
     "v",
@@ -57,9 +72,9 @@ PRESUMED_REASON_SOURCES = frozenset({"if_clause", "inferred", "none"})
 # silent pick: the decider chose without stating a reason.
 OPERATIVE_REASON_SOURCES = frozenset({"stated", "none"})
 
-MAX_SLUG_LENGTH = 40
-ID_RE = re.compile(r"^(\d{8}T\d{6}Z)-([a-z0-9]+(?:-[a-z0-9]+)*)$")
-DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+MAX_SLUG_LENGTH = validator_core.MAX_SLUG_LENGTH
+ID_RE = validator_core.ID_RE
+DATE_RE = validator_core.DATE_RE
 
 # Single source for the preferences counter-line grammar
 # ("[confirmed: N, last: YYYY-MM-DD]"): the guard's counter-math check
@@ -78,35 +93,12 @@ def estimate_tokens(text: str) -> int:
     return len(text) // CHARS_PER_TOKEN
 
 
-def validate_id(record_id: object) -> list[str]:
-    """Check the ID grammar: <YYYYMMDDTHHMMSSZ>-<kebab-slug>, slug <= 40."""
-    if not isinstance(record_id, str):
-        return ["id: must be a string"]
-    match = ID_RE.match(record_id)
-    if not match:
-        return [
-            f"id: {record_id!r} does not match "
-            "<UTC-timestamp>Z-<kebab-slug> (lowercase kebab-case slug)"
-        ]
-    slug = match.group(2)
-    if len(slug) > MAX_SLUG_LENGTH:
-        return [f"id: slug {slug!r} is {len(slug)} chars (max {MAX_SLUG_LENGTH})"]
-    return []
+validate_id = validator_core.validate_id
 
 
 def validate_envelope(record: dict) -> list[str]:
-    """Check the universal envelope: v, type, id."""
-    errors: list[str] = []
-    v = record.get("v")
-    if not isinstance(v, int) or isinstance(v, bool) or v < 1:
-        errors.append("v: must be a positive integer schema version")
-    record_type = record.get("type")
-    if record_type != RECORD_TYPE:
-        errors.append(
-            f"type: must be {RECORD_TYPE!r} in this repo, got {record_type!r}"
-        )
-    errors.extend(validate_id(record.get("id")))
-    return errors
+    """Check the universal envelope against this store's record type."""
+    return validator_core.validate_envelope(record, RECORD_TYPE)
 
 
 def _validate_options(record: dict, errors: list[str]) -> dict | None:
@@ -352,9 +344,7 @@ def validate_record(record: object, filename_stem: str | None = None) -> list[st
     if not isinstance(record, dict):
         return ["record: must be a JSON object"]
     errors = validate_envelope(record)
-    for field in REQUIRED_FIELDS:
-        if field not in record:
-            errors.append(f"{field}: required field missing")
+    errors.extend(validator_core.validate_required(record, REQUIRED_FIELDS))
     if filename_stem is not None and record.get("id") != filename_stem:
         errors.append(
             f"id: {record.get('id')!r} does not equal the filename stem "
@@ -368,30 +358,13 @@ def validate_record(record: object, filename_stem: str | None = None) -> list[st
 
 
 def validate_corpus(records: dict) -> list[str]:
-    """Cross-record checks: no dangling related/supersedes/drill_down_of.
+    """Cross-record checks: no dangling link into a record that is not
+    in the corpus.
 
     ``records`` maps record ID -> record dict (normally the whole
     ``decisions/`` directory).
     """
-    errors: list[str] = []
-    for record_id, record in sorted(records.items()):
-        if not isinstance(record, dict):
-            continue
-        refs = []
-        related = record.get("related")
-        if isinstance(related, list):
-            refs.extend(("related", ref) for ref in related)
-        for link_field in ("supersedes", "drill_down_of"):
-            ref = record.get(link_field)
-            if ref is not None:
-                refs.append((link_field, ref))
-        for field, ref in refs:
-            if ref not in records:
-                errors.append(
-                    f"{record_id}: {field} points to {ref!r}, "
-                    "which does not exist in decisions/"
-                )
-    return errors
+    return validator_core.validate_corpus(records, LINK_FIELDS, STORE_DIR)
 
 
 def check_preferences_budget(
