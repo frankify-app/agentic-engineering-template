@@ -65,7 +65,7 @@ tracked status would be a second backlog, stale by the following week.
 | `triage` | yes | `code-bug` · `doc-bug` · `expectation-bug` · `feature` |
 | `tier` | yes | `1` capsule is public (in the ticket) · `2` capsule cannot be sanitized and lives here |
 | `rung` | yes | Filing ladder reached: `record` · `ticket` · `capsule` · `repro-branch` |
-| `ticket` | yes | Forge ticket URL. The store is memory; this is the link to where work happens. |
+| `ticket` | yes | Forge ticket URL. The store is memory; this is the link to where work happens. May be `null` on a **tier-2** record whose ticket is not filed yet — see below. The key is always present: `null` declares a pending ticket, a missing key is an omission. |
 | `environment` | yes | Tool versions, repo@SHA — what makes the observation reproducible |
 | `expected` / `observed` | yes | The contradiction, stated plainly |
 | `capsule` | tier 2 | The repro capsule. Required for a tier-2 record at the `capsule` rung or above — tier 2 exists *because* the capsule cannot be public, so it has to be here. |
@@ -75,6 +75,60 @@ tracked status would be a second backlog, stale by the following week.
 | `notes` | no | Anything else |
 
 Unknown fields are tolerated: a new optional field needs no migration.
+
+## Tier 2: what the public ticket may say
+
+The capsule stays here. The forge ticket carries a summary, and the
+rule for deriving it is:
+
+> Anything that survives substituting **invented specifics for real
+> ones** may go in the ticket. Anything that identifies the real system
+> may not. The floor is a ticket titled `bug` and nothing else.
+
+Dummy values, not redaction — but note the distinction from tier 1. A
+tier-1 capsule is synthesized so that it **still reproduces**; a
+tier-2 stub only conveys the *shape* of the failure and is not
+expected to run. **Runnability is the tier boundary**: if a leak-free
+version reproduces, it is tier 1 and belongs in the ticket.
+
+A stub too thin to act on is not a failure of this design. Whoever
+picks the work up has store access and greps `records/` for the ticket
+URL to find the real detail. The public ticket exists so the work is
+*tracked*, not so it is *understood* — forge issues inherit repo
+visibility, so public tracking with private detail is the only shape
+available.
+
+## Tier 2: the filing order
+
+Filing a tier-2 ticket is the one step in this store that is not
+reversible, so it is the one step a human gates.
+
+1. Capture mints the record with `"ticket": null` and opens a PR.
+2. A human reviews the capsule — this is the gate, and it is
+   mechanical: a tier-2 record in the diff withholds auto-merge.
+3. On approval, the ticket is filed with whatever detail the
+   derivation rule above permits.
+4. The ticket URL is amended into the record **in the same PR**. This
+   is legal: `check_append_only` diffs `base...HEAD`, so a record
+   added and later amended inside one PR still reads as an addition.
+5. Merge.
+
+The record is *valid* at step 1 and *not mergeable* until step 4 —
+two different rules, deliberately in two different places.
+`validate_record` describes what a record is; `check_tickets_filed`
+decides what may land. Expect CI to be red between steps 1 and 4; that
+is the guard doing its job, not a problem to route around.
+
+Tier 1 has no such window. Its capsule is public, so its ticket is
+filed at detection and `ticket` is never null.
+
+## Leaks are evidence too
+
+No rule stops a determined mistake, and none is claimed to. A leak —
+including a low-risk or no-risk one — is itself a detection worth a
+record. Prevention gets built from observed weak spots rather than
+imagined ones, which is the same loop this store exists to serve,
+pointed at the store's own failure mode.
 
 ## Links point backward, always
 

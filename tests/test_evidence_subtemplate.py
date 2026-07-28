@@ -264,7 +264,9 @@ def test_a_tier_two_record_may_mint_before_its_ticket_exists() -> None:
     """The tier-2 ticket is filed only after a human approves the
     capsule, so the record necessarily predates it. That intermediate
     state is a valid RECORD; the guard is what refuses to merge it."""
-    record = capture.draft_to_record({**draft(), "tier": 2, "ticket": None}, NOW)
+    record = capture.draft_to_record(
+        {**draft(), "tier": 2, "ticket": None, "capsule": "$ repro.sh"}, NOW
+    )
     assert validator.validate_record(record) == []
 
 
@@ -286,9 +288,11 @@ def test_the_ticket_must_still_be_a_url_when_present() -> None:
 def test_the_ticket_key_must_be_present_even_when_null() -> None:
     """Null is a declaration that the ticket is pending; a missing key
     is an omission. The contract distinguishes them."""
-    record = capture.draft_to_record({**draft(), "tier": 2}, NOW)
+    record = capture.draft_to_record(
+        {**draft(), "tier": 2, "capsule": "$ repro.sh"}, NOW
+    )
     del record["ticket"]
-    assert any(e.startswith("ticket:") for e in validator.validate_record(record))
+    assert validator.validate_record(record) == ["ticket: required field missing"]
 
 
 def test_a_null_ticket_blocks_the_merge_gate() -> None:

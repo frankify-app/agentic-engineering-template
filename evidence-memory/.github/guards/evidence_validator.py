@@ -133,10 +133,42 @@ def _validate_placement(record: dict, errors: list[str]) -> None:
 def _validate_ticket(record: dict, errors: list[str]) -> None:
     """Every record names its forge ticket: the store is memory, the
     forge is the actionable backlog, and the link is what keeps them
-    from drifting into two trackers."""
-    ticket = record.get("ticket")
+    from drifting into two trackers.
+
+    A tier-2 record may carry ``null`` while its PR is under review.
+    Its ticket is filed only once a human has approved the capsule, so
+    the record necessarily exists before the ticket does. That state is
+    a valid record and NOT a mergeable one — the merge gate is
+    ``check_tickets_filed``, deliberately separate so the contract
+    describes what a record is and the guard decides what may land.
+
+    The key is required either way: ``null`` declares a pending ticket,
+    a missing key is an omission, and the two should not read alike.
+    """
+    if "ticket" not in record:
+        return  # the required-field check owns the missing-key case
+    ticket = record["ticket"]
+    if ticket is None and record.get("tier") == 2:
+        return
     if not isinstance(ticket, str) or not ticket.startswith("http"):
         errors.append("ticket: must be the forge ticket URL")
+
+
+def check_tickets_filed(records: dict) -> list[str]:
+    """Merge gate: no record lands without its forge ticket.
+
+    Separate from ``validate_record`` because it answers a different
+    question. The contract asks "is this a well-formed record?" — and a
+    tier-2 record awaiting approval is. This asks "may the store move
+    to this state?", and a store containing work with nowhere to track
+    it is the two-tracker drift the ticket link exists to prevent.
+    """
+    return [
+        f"{record_id}: ticket is still null — file the forge ticket and "
+        "amend it into this record before merging"
+        for record_id, record in sorted(records.items())
+        if isinstance(record, dict) and record.get("ticket") is None
+    ]
 
 
 def _validate_links_point_backward(record: dict, errors: list[str]) -> None:

@@ -86,6 +86,7 @@ def check_corpus(root: str = ".") -> list[str]:
             if isinstance(record, dict):
                 records[stem] = record
     errors.extend(evidence_validator.validate_corpus(records))
+    errors.extend(evidence_validator.check_tickets_filed(records))
     return errors
 
 

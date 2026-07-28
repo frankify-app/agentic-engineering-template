@@ -43,9 +43,28 @@ Sanitize by **synthesis, not redaction**: a synthetic fixture is both
 leak-free and runnable, a redacted one is neither. Tier 1 is preferred
 whenever synthesis is possible at all.
 
+**Runnability is the boundary.** If a leak-free version still
+reproduces, it is tier 1 and belongs in the public ticket. A tier-2
+stub conveys only the *shape* of the failure, using invented
+specifics, and is not expected to run. Floor: a ticket titled `bug`.
+
+A thin stub is fine. Whoever picks the work up has store access and
+greps `records/` for the ticket URL. The ticket exists so the work is
+tracked, not so it is understood.
+
+**A tier-2 ticket is filed only after a human approves the PR.** Mint
+the record with `"ticket": null`, open the PR, wait. After approval,
+file the ticket and amend its URL into the record in the same PR. CI
+is red until you do — that is the guard working, not something to
+route around. Never file a tier-2 ticket before approval.
+
 Before filing anything public, re-read what you are about to write for
 paths, hostnames, tokens, and internal identifiers. A record here is
 private; the ticket it links is not.
+
+If you leak anything — even low-risk, even by accident — that is
+itself a detection. File it. Prevention here is built from observed
+weak spots, not imagined ones.
 
 ## Filing
 
