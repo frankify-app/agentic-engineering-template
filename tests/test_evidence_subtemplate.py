@@ -32,6 +32,7 @@ STORE_FILES = frozenset(
         ".github/guards/validator_core.py",
         ".github/labels.toml",
         ".github/workflows/guards.yml",
+        ".github/workflows/template-update.yml",
         ".github/workflows/labels.yml",
         ".gitignore",
         "AGENTS.md",
@@ -49,6 +50,7 @@ STORE_FILES = frozenset(
 SHARED_CORES = (
     "tools/record_core.py",
     ".github/guards/validator_core.py",
+    ".github/workflows/template-update.yml",
 )
 
 validator = load_module(
@@ -346,3 +348,23 @@ def test_the_store_takes_no_triage_or_phase_labels(tmp_path: Path) -> None:
     defined = tomllib.loads((dst_path / ".github" / "labels.toml").read_text())
 
     assert set(defined) == {"needs-human-review", "tier-2"}
+
+
+def test_the_store_updater_matches_the_one_consumers_get() -> None:
+    """A store vendors record_core and validator_core, so a fix to
+    either reaches it only through `copier update`. Without an updater
+    the store silently runs a stale validator — the gap meta#30 names.
+
+    Byte-identical to the consumer workflow on purpose: three copies
+    that DIFFER would mean the stores update by different rules than
+    everything else, which is the drift the pinning exists to stop.
+    """
+    consumer = (
+        PROJECT_ROOT
+        / "template"
+        / "{% if agentic_forge == 'github' %}.github{% endif %}"
+        / "workflows"
+        / "template-update.yml"
+    ).read_bytes()
+    store = (SUBTEMPLATE / ".github" / "workflows" / "template-update.yml").read_bytes()
+    assert store == consumer
