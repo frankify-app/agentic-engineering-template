@@ -52,7 +52,11 @@ COMMIT_SUBJECT_RES = (
     re.compile(r"^chore(\([\w-]+\))?: .+$"),
 )
 
-COUNTER_RE = decision_validator.COUNTER_RE
+parse_metadata = decision_validator.parse_metadata
+strip_metadata = decision_validator.strip_metadata
+counter_of = decision_validator.counter_of
+COUNTER_KEY = decision_validator.COUNTER_KEY
+INDEPENDENT_KEY = decision_validator.INDEPENDENT_KEY
 
 # The types permitted to REMOVE lines from preferences.md. Promotion and
 # compaction are different acts on the same file: promotion adds a rule a
@@ -103,22 +107,77 @@ def validate_pref_confirm_change(removed: list[str], added: list[str]) -> list[s
         )
         return errors
     for old, new in zip(removed, added):
-        old_match = COUNTER_RE.search(old)
-        new_match = COUNTER_RE.search(new)
-        if not old_match or not new_match:
+        old_count = counter_of(old)
+        new_count = counter_of(new)
+        if old_count is None or new_count is None:
             errors.append(
                 "pref-confirm: changed a line without a "
-                f"[confirmed: N, last: DATE] counter: {old!r} -> {new!r}"
+                f"[{COUNTER_KEY}: N, ...] suffix: {old!r} -> {new!r}"
             )
             continue
-        if COUNTER_RE.sub("", old) != COUNTER_RE.sub("", new):
+        if strip_metadata(old) != strip_metadata(new):
             errors.append(f"pref-confirm: rule text changed: {old!r} -> {new!r}")
-        if int(new_match.group(1)) != int(old_match.group(1)) + 1:
+        if new_count != old_count + 1:
             errors.append(
                 "pref-confirm: counter must increment by exactly 1: "
-                f"{old_match.group(1)} -> {new_match.group(1)}"
+                f"{old_count} -> {new_count}"
             )
+        errors.extend(_check_suffix_rest(old, new))
     return errors
+
+
+def _check_suffix_rest(old: str, new: str) -> list[str]:
+    """The part of the suffix that is not the counter or its date.
+
+    `independent` is a second count, earned differently: it rises only
+    when a confirmation was NOT the rule crediting itself. A bump may
+    move it by at most one and never downwards, since lowering it under
+    a mechanical subject would erase evidence as routine bookkeeping.
+    """
+    old_ind = _int_or_none((parse_metadata(old) or {}).get(INDEPENDENT_KEY))
+    new_ind = _int_or_none((parse_metadata(new) or {}).get(INDEPENDENT_KEY))
+    if old_ind is None or new_ind is None:
+        return [
+            f"pref-confirm: every rule carries {INDEPENDENT_KEY}; "
+            f"{old!r} -> {new!r} is missing it"
+        ]
+    if new_ind not in (old_ind, old_ind + 1):
+        return [
+            f"pref-confirm: {INDEPENDENT_KEY} moved {old_ind} -> {new_ind}; a bump "
+            "may hold it or raise it by exactly 1"
+        ]
+    return []
+
+
+def _rule_bullets(text: str) -> list[str]:
+    """Each `- ` rule in preferences.md, wrapped lines rejoined.
+
+    A rule may span several lines with its suffix on the last, so the
+    check has to see the whole entry rather than one line of it.
+    """
+    bullets: list[str] = []
+    current: list[str] | None = None
+    for line in text.splitlines():
+        if line.startswith("- "):
+            if current is not None:
+                bullets.append(" ".join(current))
+            current = [line.strip()]
+        elif current is not None:
+            if not line.strip() or line.startswith("#"):
+                bullets.append(" ".join(current))
+                current = None
+            else:
+                current.append(line.strip())
+    if current is not None:
+        bullets.append(" ".join(current))
+    return bullets
+
+
+def _int_or_none(value: str | None) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except ValueError:
+        return None
 
 
 def _git(*args: str) -> str:
@@ -211,11 +270,23 @@ def check_corpus(root: str = ".") -> list[str]:
     preferences_path = os.path.join(root, "preferences.md")
     if os.path.isfile(preferences_path):
         with open(preferences_path, encoding="utf-8") as handle:
-            errors.extend(
-                decision_validator.check_preferences_budget(
-                    handle.read(), int(config["budget_tokens"])
-                )
+            preferences_text = handle.read()
+        errors.extend(
+            decision_validator.check_preferences_budget(
+                preferences_text, int(config["budget_tokens"])
             )
+        )
+        # Every rule carries its counters. A rule that lost them reads
+        # as one nobody has ever confirmed, which is the same shape the
+        # counters exist to distinguish.
+        errors.extend(
+            f"preferences.md: {error}"
+            for error in map(
+                decision_validator.check_metadata_suffix,
+                _rule_bullets(preferences_text),
+            )
+            if error
+        )
     return errors
 
 

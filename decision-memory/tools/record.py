@@ -584,12 +584,26 @@ def _normalize(text: str) -> str:
 
 
 def bump_preference_counter(
-    preferences_text: str, rule: str, today: str, counter_re: re.Pattern
+    preferences_text: str,
+    rule: str,
+    today: str,
+    validator,
+    *,
+    independent: bool = False,
 ) -> tuple[str, int] | None:
     """Bump the confirmation counter of the bullet matching ``rule``.
 
-    ``counter_re`` is the vendored validator's COUNTER_RE — the single
-    source of the counter-line grammar, shared with the CI guard.
+    ``validator`` is the data repo's vendored decision_validator — the
+    single source of the metadata-suffix grammar, shared with the CI
+    guard, so writer and guard cannot disagree about the format.
+
+    ``independent`` also raises the `independent` count. It is true only
+    when the confirmation was NOT the rule crediting itself: the rule
+    was cited on an option, and the decider chose that option, but it
+    was not the slot the rule was written into. The two are counted
+    apart because `confirmed` alone also rises when a rule predicts the
+    slot it authored, which reads as evidence without being any.
+
     Returns (new_text, new_count), or None when no bullet matches.
     Handles wrapped bullets: an entry runs from its `- ` line to the
     next bullet/heading/blank line; the counter sits on its last line.
@@ -614,13 +628,19 @@ def bump_preference_counter(
         if wanted not in entry_text:
             continue
         for i in range(end - 1, begin - 1, -1):
-            match = counter_re.search(lines[i])
-            if match:
-                count = int(match.group(1)) + 1
-                lines[i] = counter_re.sub(
-                    f"[confirmed: {count}, last: {today}]", lines[i]
-                )
-                return "".join(lines), count
+            pairs = validator.parse_metadata(lines[i])
+            if not pairs or validator.COUNTER_KEY not in pairs:
+                continue
+            count = int(pairs[validator.COUNTER_KEY]) + 1
+            pairs[validator.COUNTER_KEY] = str(count)
+            pairs[validator.DATE_KEY] = today
+            if independent:
+                prior = int(pairs.get(validator.INDEPENDENT_KEY, "0"))
+                pairs[validator.INDEPENDENT_KEY] = str(prior + 1)
+            suffix = validator.format_metadata(pairs)
+            trailing = "\n" if lines[i].endswith("\n") else ""
+            lines[i] = validator.strip_metadata(lines[i]) + " " + suffix + trailing
+            return "".join(lines), count
     return None
 
 
@@ -645,6 +665,31 @@ def prediction_rules(record: dict) -> list[str]:
         ):
             rules = option.get("rules_cited")
             return [r for r in rules if isinstance(r, str)] if rules else []
+    return []
+
+
+def independent_rules(record: dict) -> list[str]:
+    """Rules confirmed by the decider WITHOUT the rule picking the slot.
+
+    `prediction_rules` returns the rules cited on the prediction slot,
+    and a `hit` means that slot was chosen — so every confirmation it
+    yields is the rule agreeing with the option it authored. That is
+    worth counting, but it is not evidence the rule tracks the decider.
+
+    This is the other case: a rule cited on some non-prediction option
+    that the decider chose anyway. The rule did not put the option in
+    front of them, and they took it regardless.
+    """
+    chosen_slot = record.get("chosen_slot")
+    if chosen_slot is None:
+        return []
+    for option in record.get("options", []):
+        if not isinstance(option, dict) or option.get("slot") != chosen_slot:
+            continue
+        if option.get("role") in ("prediction", "prediction+recommendation"):
+            return []
+        rules = option.get("rules_cited") or []
+        return [rule for rule in rules if isinstance(rule, str)]
     return []
 
 
@@ -720,12 +765,18 @@ def cmd_submit(args: argparse.Namespace) -> int:
 
     preferences_path = repo_dir / "preferences.md"
     for record in records:
-        if (
-            record.get("prediction_stream") != "preference-driven"
-            or record.get("outcome") != "hit"
-        ):
+        if record.get("prediction_stream") != "preference-driven":
             continue
-        for rule in prediction_rules(record):
+        # Two ways a rule earns a confirmation, and they are counted
+        # apart. A `hit` credits the rules cited on the slot that won —
+        # the rule agreeing with itself. Anything else can still confirm
+        # a rule, if the decider chose an option that cited it without
+        # that rule having proposed it; that one is independent.
+        if record.get("outcome") == "hit":
+            confirmations = [(rule, False) for rule in prediction_rules(record)]
+        else:
+            confirmations = [(rule, True) for rule in independent_rules(record)]
+        for rule, independent in confirmations:
             if not preferences_path.exists():
                 print(f"WARN: no preferences.md — cannot bump {rule!r}")
                 continue
@@ -733,7 +784,8 @@ def cmd_submit(args: argparse.Namespace) -> int:
                 preferences_path.read_text(encoding="utf-8"),
                 rule,
                 today,
-                validator.COUNTER_RE,
+                validator,
+                independent=independent,
             )
             if bumped is None:
                 print(
