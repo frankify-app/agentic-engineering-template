@@ -9,6 +9,8 @@ import copier
 import pytest
 import yaml
 
+from tests.conftest import load_module
+
 PROJECT_ROOT = Path(__file__).parent.parent
 
 
@@ -694,6 +696,14 @@ def test_the_weekly_run_fails_loudly_when_the_repo_is_behind(
     assert "did not reach this repo" in workflow
     assert "::error::" in workflow
 
+
+def _detect_forge():
+    """The template's own probe, loaded from the extension it ships."""
+    return load_module(
+        "agentic_ext", PROJECT_ROOT / "extensions" / "agentic.py"
+    ).detect_forge()
+
+
 def _git_repo_with_origin(path: Path, url: str) -> None:
     """A throwaway repo, so `detect_forge()` sees the remote we choose."""
     path.mkdir(parents=True, exist_ok=True)
@@ -730,6 +740,21 @@ def test_the_forge_answer_is_recorded_however_the_render_environment_looks(
     cwd = tmp_path / "cwd"
     _git_repo_with_origin(cwd, origin_url)
     monkeypatch.chdir(cwd)
+
+    # Assert the PRECONDITION, not a correlate of it. GitHub reachability
+    # is not the question — a git config `insteadOf` rewrite can map every
+    # github.com URL to a proxy, which leaves the network fine and the
+    # probe permanently blind. A sandboxed agent session is exactly that.
+    #
+    # Skip rather than pass: a test that cannot reach its own condition
+    # must not report the same colour as one that checked it.
+    detected = _detect_forge()
+    wanted = "github" if "github.com" in origin_url else None
+    if detected != wanted:
+        pytest.skip(
+            f"environment cannot exercise this case: origin {origin_url!r} "
+            f"resolves to detect_forge()={detected!r}, wanted {wanted!r}"
+        )
 
     # Deliberately NOT supplied: an explicit value is recorded whatever
     # `when` says, which is exactly what hides the defect. A real update
