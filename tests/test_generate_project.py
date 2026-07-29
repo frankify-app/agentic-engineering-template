@@ -646,3 +646,47 @@ def test_forgejo_forge_ships_no_github_org_plumbing(
     dst_path = _render(tmp_path, answers, "no-plumbing-forgejo")
 
     assert not (dst_path / ".github").exists()
+
+
+def test_consumers_are_told_about_a_release_rather_than_polling_for_it(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """A weekly poll means a template release reaches a consumer up to
+    seven days later — a timer catching up, not a mechanism. The cron
+    stays as the backstop: it is what makes a FAILED dispatch survivable,
+    and it covers repos stamped after the fan-out already ran.
+    """
+    dst_path = _render(tmp_path, base_answers, "dispatch-trigger")
+
+    _check_file_contents(
+        dst_path / ".github" / "workflows" / "template-update.yml",
+        [
+            "repository_dispatch:",
+            "types: [template-released]",
+            'cron: "17 5 * * 1"',
+            "workflow_dispatch:",
+        ],
+    )
+
+
+def test_the_weekly_run_fails_loudly_when_the_repo_is_behind(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """A green weekly run must mean "on the latest template", not "the
+    workflow executed". Being quietly behind is the state the whole
+    updater exists to prevent, and it is invisible otherwise.
+
+    Only on `schedule`: the cron is the auditor. A dispatch that fails
+    is already visible to whoever triggered it.
+    """
+    dst_path = _render(tmp_path, base_answers, "update-audit")
+    workflow = (dst_path / ".github" / "workflows" / "template-update.yml").read_text()
+
+    assert "github.event_name == 'schedule'" in workflow
+    # Both drift causes are named, because the remedy differs: merge the
+    # PR, versus go and look at why the fan-out never arrived.
+    assert "has not been merged" in workflow
+    assert "did not reach this repo" in workflow
+    assert "::error::" in workflow
