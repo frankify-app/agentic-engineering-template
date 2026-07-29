@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import json
+import subprocess
 from pathlib import Path
 
 import copier
+import pytest
+import yaml
+
+from tests.conftest import load_module
 
 PROJECT_ROOT = Path(__file__).parent.parent
 
@@ -690,3 +695,109 @@ def test_the_weekly_run_fails_loudly_when_the_repo_is_behind(
     assert "has not been merged" in workflow
     assert "did not reach this repo" in workflow
     assert "::error::" in workflow
+
+
+def _detect_forge():
+    """The template's own probe, loaded from the extension it ships."""
+    return load_module(
+        "agentic_ext", PROJECT_ROOT / "extensions" / "agentic.py"
+    ).detect_forge()
+
+
+def _git_repo_with_origin(path: Path, url: str) -> None:
+    """A throwaway repo, so `detect_forge()` sees the remote we choose."""
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(["git", "remote", "add", "origin", url], cwd=path, check=True)
+
+
+@pytest.mark.parametrize(
+    "origin_url",
+    [
+        # Detection succeeds — the case that dropped the answer.
+        "https://github.com/acme/widget.git",
+        # Detection fails — any non-github remote, including the local
+        # proxy a sandboxed agent session actually runs behind.
+        "http://127.0.0.1:41729/git/acme/widget",
+    ],
+)
+def test_the_forge_answer_is_recorded_however_the_render_environment_looks(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    origin_url: str,
+) -> None:
+    """The answers file is the record of how a repo was stamped, so a
+    question whose `when` consults the ENVIRONMENT makes that record
+    depend on where the render ran.
+
+    `detect_forge()` shells out to `git remote get-url origin` in the
+    process CWD. Gating the question on it meant the answer was written
+    when detection failed and dropped when it succeeded — two checkouts
+    of one commit producing different answers files. Detection belongs
+    in the default, not in the gate.
+    """
+    cwd = tmp_path / "cwd"
+    _git_repo_with_origin(cwd, origin_url)
+    monkeypatch.chdir(cwd)
+
+    # Assert the PRECONDITION, not a correlate of it. GitHub reachability
+    # is not the question — a git config `insteadOf` rewrite can map every
+    # github.com URL to a proxy, which leaves the network fine and the
+    # probe permanently blind. A sandboxed agent session is exactly that.
+    #
+    # Skip rather than pass: a test that cannot reach its own condition
+    # must not report the same colour as one that checked it.
+    detected = _detect_forge()
+    wanted = "github" if "github.com" in origin_url else None
+    if detected != wanted:
+        pytest.skip(
+            f"environment cannot exercise this case: origin {origin_url!r} "
+            f"resolves to detect_forge()={detected!r}, wanted {wanted!r}"
+        )
+
+    # Deliberately NOT supplied: an explicit value is recorded whatever
+    # `when` says, which is exactly what hides the defect. A real update
+    # supplies nothing — it reuses the answers file and re-evaluates the
+    # gate, so a key recorded last time can silently vanish.
+    answers_in = {k: v for k, v in base_answers.items() if k != "agentic_forge"}
+
+    dst_path = _render(tmp_path, answers_in, "forge-recorded")
+    answers = (dst_path / ".copier-answers.agentic.yml").read_text()
+
+    assert "agentic_forge: github" in answers
+
+
+# Globals the Jinja extension injects. Anything here reads the machine
+# the render happens on, not the answers.
+ENVIRONMENT_PROBES = ("detect_forge", "resolve_repo_owner")
+
+
+def test_no_question_gate_consults_the_environment() -> None:
+    """A `when` clause decides whether an answer is RECORDED, so one that
+    probes the machine makes the answers file depend on where the render
+    ran — two checkouts of one commit, two different files.
+
+    `agentic_forge` had exactly this: gated on `detect_forge()`, it was
+    written when detection failed and dropped when it succeeded. The
+    remedy is not specific to that question, so neither is this test.
+
+    Probes belong in `default`, where they seed a first stamp and are
+    then superseded by the recorded answer. `agentic_repo_owner` is the
+    worked example: same probe, in the default, always recorded.
+    """
+    questions = yaml.safe_load((PROJECT_ROOT / "copier.yml").read_text())
+
+    offenders = [
+        name
+        for name, spec in questions.items()
+        if isinstance(spec, dict)
+        for probe in ENVIRONMENT_PROBES
+        if probe in str(spec.get("when", ""))
+    ]
+
+    assert offenders == [], (
+        f"{offenders}: `when` must depend only on other answers. Move the "
+        "probe into `default` so the answer is asked, recorded, and "
+        "reproducible."
+    )

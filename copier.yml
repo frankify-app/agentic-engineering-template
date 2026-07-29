@@ -98,7 +98,11 @@ agentic_forge:
     {%- else -%}
     github
     {%- endif %}
-  when: "{{ agentic_subtemplate == 'template' and not detect_forge() }}"
+  # Gated on the subtemplate only. Gating on `detect_forge()` made the
+  # ANSWER conditional on the machine: recorded when detection failed,
+  # dropped when it succeeded. The probe seeds the default above, where
+  # the recorded answer supersedes it on every later update.
+  when: "{{ agentic_subtemplate == 'template' }}"
 
 agentic_forgejo_host:
   type: str
