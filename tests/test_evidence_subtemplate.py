@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import tomllib
 from pathlib import Path
 
 import copier
@@ -29,7 +30,9 @@ STORE_FILES = frozenset(
         ".github/guards/evidence_validator.py",
         ".github/guards/guards.py",
         ".github/guards/validator_core.py",
+        ".github/labels.toml",
         ".github/workflows/guards.yml",
+        ".github/workflows/labels.yml",
         ".gitignore",
         "AGENTS.md",
         "CLAUDE.md",
@@ -305,3 +308,41 @@ def test_a_null_ticket_blocks_the_merge_gate() -> None:
 
     filed = {**record, "ticket": "https://github.com/pandoscope/ghx/issues/1"}
     assert validator.check_tickets_filed({filed["id"]: filed}) == []
+
+
+# ------------------------ the tier-2 gate's labels ------------------------
+
+
+def test_the_store_ships_the_labels_its_tier_two_gate_needs(
+    tmp_path: Path,
+) -> None:
+    """#103's two-lane gate is label-based, so the labels have to exist
+    in the store before the gate can be mechanical rather than
+    conventional. The project template's taxonomy does not reach here:
+    a store renders its own file set and stays consumer-ignorant.
+    """
+    dst_path = _render_store(tmp_path)
+
+    config = (dst_path / ".github" / "labels.toml").read_text()
+    # The lane marker: a tier-2 record waits for a human, and this is how
+    # that wait is visible without opening every PR.
+    assert "needs-human-review" in config
+    # The tier itself, so the gate can select on it.
+    assert "tier-2" in config
+
+    workflow = (dst_path / ".github" / "workflows" / "labels.yml").read_text()
+    assert ".github/labels.toml" in workflow
+    assert "LABELS_TOKEN" in workflow
+
+
+def test_the_store_takes_no_triage_or_phase_labels(tmp_path: Path) -> None:
+    """Triage lives on the forge TICKET, not on the record's PR — the
+    store is memory, not a tracker. Shipping the ticket taxonomy here
+    would invite classifying in two places, which is how they diverge.
+    """
+    dst_path = _render_store(tmp_path)
+    # Parse rather than substring-match: the file explains in prose which
+    # labels it deliberately omits, and naming them there is the point.
+    defined = tomllib.loads((dst_path / ".github" / "labels.toml").read_text())
+
+    assert set(defined) == {"needs-human-review", "tier-2"}

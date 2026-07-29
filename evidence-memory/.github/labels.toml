@@ -1,0 +1,23 @@
+# Label taxonomy for an evidence store, synced by
+# .github/workflows/labels.yml.
+#
+# Copier-vendored from the agentic-engineering-template evidence
+# subtemplate — change it in the template, not here.
+#
+# Deliberately tiny, and deliberately NOT the project taxonomy. Triage
+# (code-bug / doc-bug / expectation-bug / feature) belongs on the forge
+# TICKET a record links, never on the record's own PR: this store is
+# memory, not a tracker, and classifying in two places is how the two
+# classifications diverge.
+#
+# WARNING: `labels sync` DELETES any label not listed here.
+
+[needs-human-review]
+color = "b60205"
+name = "needs-human-review"
+description = "Never auto-merges: a human approves the capsule before its ticket is filed"
+
+[tier-2]
+color = "5319e7"
+name = "tier-2"
+description = "Capsule cannot be sanitized, so it stays in the store and the ticket carries a summary"
