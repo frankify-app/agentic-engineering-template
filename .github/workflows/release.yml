@@ -33,7 +33,68 @@ jobs:
           # semantic-release needs full history and tags to find the
           # previous release and analyze the commits since.
           fetch-depth: 0
+      - name: Record the tag before releasing
+        id: before
+        run: echo "tag=$(git tag --list --sort=-v:refname | head -1)" >> "$GITHUB_OUTPUT"
+
       - run: npx --yes semantic-release@24
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Detect whether a release was actually cut
+        id: released
+        run: |
+          set -euo pipefail
+          after="$(git tag --list --sort=-v:refname | head -1)"
+          if [ "$after" != "${{ steps.before.outputs.tag }}" ]; then
+            echo "tag=$after" >> "$GITHUB_OUTPUT"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No new tag — nothing to announce."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The release above is published with GITHUB_TOKEN, and GitHub does
+      # not let a GITHUB_TOKEN-created event trigger further workflows. So
+      # an `on: release` workflow would never fire, and the fan-out has to
+      # happen here, with an app token.
+      - name: Mint release-bot token for the fan-out
+        if: steps.released.outputs.released == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Tell every stamped repo a release is out
+        if: steps.released.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          SELF: ${{ github.repository }}
+          TAG: ${{ steps.released.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Consumers are DISCOVERED, never listed: a hardcoded array is a
+          # per-repo checklist, which is the thing this factory replaces
+          # with mechanism. A repo is a consumer iff it carries an answers
+          # file naming this template.
+          failed=0
+          for repo in $(gh repo list "$OWNER" --limit 200 --json nameWithOwner --jq '.[].nameWithOwner'); do
+            [ "$repo" = "$SELF" ] && continue
+            gh api "repos/$repo/contents/.copier-answers.agentic.yml" \
+              --jq .name >/dev/null 2>&1 || continue
+            if gh api --method POST "repos/$repo/dispatches" \
+                 -f "event_type=template-released" \
+                 -f "client_payload[tag]=$TAG"; then
+              echo "dispatched $TAG -> $repo"
+            else
+              # Never swallowed: a consumer that silently stops receiving
+              # updates is indistinguishable from one that is up to date.
+              echo "::error::dispatch failed for $repo"
+              failed=1
+            fi
+          done
+          exit "$failed"

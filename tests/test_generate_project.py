@@ -646,3 +646,25 @@ def test_forgejo_forge_ships_no_github_org_plumbing(
     dst_path = _render(tmp_path, answers, "no-plumbing-forgejo")
 
     assert not (dst_path / ".github").exists()
+
+
+def test_consumers_are_told_about_a_release_rather_than_polling_for_it(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """A weekly poll means a template release reaches a consumer up to
+    seven days later — a timer catching up, not a mechanism. The cron
+    stays as the backstop: it is what makes a FAILED dispatch survivable,
+    and it covers repos stamped after the fan-out already ran.
+    """
+    dst_path = _render(tmp_path, base_answers, "dispatch-trigger")
+
+    _check_file_contents(
+        dst_path / ".github" / "workflows" / "template-update.yml",
+        [
+            "repository_dispatch:",
+            "types: [template-released]",
+            'cron: "17 5 * * 1"',
+            "workflow_dispatch:",
+        ],
+    )

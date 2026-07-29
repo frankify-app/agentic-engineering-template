@@ -1,8 +1,15 @@
 name: Template Update
 
 on:
+  # Fired by the template's own release job the moment a release is cut,
+  # so an update arrives because something happened rather than because a
+  # timer caught up.
+  repository_dispatch:
+    types: [template-released]
   schedule:
-    # Weekly, off the top of the hour to dodge GitHub's cron stampede.
+    # Backstop, not the delivery path: a repo stamped after the dispatch
+    # ran, or one the dispatch failed to reach, still converges within a
+    # week. Off the top of the hour to dodge GitHub's cron stampede.
     - cron: "17 5 * * 1"
   workflow_dispatch:
 
