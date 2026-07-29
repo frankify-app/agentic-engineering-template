@@ -51,6 +51,9 @@ COMMON_FILES = frozenset(
 GITHUB_ONLY_FILES = frozenset(
     {
         ".github/workflows/template-update.yml",
+        ".github/labels.toml",
+        ".github/workflows/add-to-project.yml",
+        ".github/workflows/labels.yml",
         ".github/workflows/lint.yml",
     }
 )
