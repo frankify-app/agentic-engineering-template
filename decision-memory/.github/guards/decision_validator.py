@@ -76,10 +76,100 @@ MAX_SLUG_LENGTH = validator_core.MAX_SLUG_LENGTH
 ID_RE = validator_core.ID_RE
 DATE_RE = validator_core.DATE_RE
 
-# Single source for the preferences counter-line grammar
-# ("[confirmed: N, last: YYYY-MM-DD]"): the guard's counter-math check
-# and the writer's pref-confirm bumps both consume this regex.
-COUNTER_RE = re.compile(r"\[confirmed: (\d+), last: (\d{4}-\d{2}-\d{2})\]")
+# Single source for the preferences metadata-suffix grammar (see
+# decision-memory/docs/conventions.md): one trailing bracket holding
+# comma-separated `key: value` pairs. The guard's counter-math check
+# and the writer's pref-confirm bumps both consume these.
+#
+# Parsed rather than pattern-matched so the key set is one tuple a
+# reader can check against the doc, not a shape encoded in a regex.
+METADATA_RE = re.compile(r"\[([^\]\[]*)\]\s*$")
+
+COUNTER_KEY = "confirmed"
+INDEPENDENT_KEY = "independent"
+DATE_KEY = "last"
+
+# Exactly these, on every rule, in this order. A closed set is what
+# keeps the suffix from gaining keys nothing reads: adding one is a
+# deliberate change here, with its consumer, rather than something a
+# writer can introduce in passing.
+SUFFIX_KEYS = (COUNTER_KEY, INDEPENDENT_KEY, DATE_KEY)
+
+
+def parse_metadata(line: str) -> dict[str, str] | None:
+    """Parse a rule line's trailing metadata bracket.
+
+    Returns the key/value pairs, or None when the line carries no
+    bracket or the bracket is not this grammar (a bare `[note]`, a
+    markdown link). Values are returned as written; callers coerce.
+    """
+    match = METADATA_RE.search(line)
+    if not match:
+        return None
+    pairs: dict[str, str] = {}
+    for chunk in match.group(1).split(","):
+        key, sep, value = chunk.partition(":")
+        if not sep:
+            return None
+        pairs[key.strip()] = value.strip()
+    return pairs or None
+
+
+def format_metadata(pairs: dict[str, str]) -> str:
+    """Render pairs back into a suffix, in SUFFIX_KEYS order."""
+    body = ", ".join(f"{k}: {pairs[k]}" for k in SUFFIX_KEYS if k in pairs)
+    return f"[{body}]"
+
+
+def strip_metadata(line: str) -> str:
+    """The rule text alone — what two rules are compared on."""
+    return METADATA_RE.sub("", line).rstrip()
+
+
+def counter_of(line: str) -> int | None:
+    """The `confirmed` value of a rule line, if it has a valid one."""
+    pairs = parse_metadata(line)
+    if not pairs or COUNTER_KEY not in pairs:
+        return None
+    try:
+        return int(pairs[COUNTER_KEY])
+    except ValueError:
+        return None
+
+
+def check_metadata_suffix(line: str) -> str | None:
+    """Return an error for a rule bullet whose suffix is malformed.
+
+    Applied to every `- ` bullet in preferences.md, so a rule that
+    silently lost its counters fails the guard instead of merging and
+    reading as a rule nobody has ever confirmed.
+    """
+    pairs = parse_metadata(line)
+    if pairs is None:
+        return f"rule has no metadata suffix: {line.strip()!r}"
+    if set(pairs) != set(SUFFIX_KEYS):
+        missing = [key for key in SUFFIX_KEYS if key not in pairs]
+        unknown = [key for key in pairs if key not in SUFFIX_KEYS]
+        return (
+            f"rule suffix must carry exactly {list(SUFFIX_KEYS)} "
+            f"(missing {missing}, unknown {unknown}): {line.strip()!r}"
+        )
+    for key in (COUNTER_KEY, INDEPENDENT_KEY):
+        if not pairs[key].isdigit():
+            return f"rule suffix {key}={pairs[key]!r} is not a count: {line.strip()!r}"
+    if not DATE_RE.fullmatch(pairs[DATE_KEY]):
+        return (
+            f"rule suffix {DATE_KEY}={pairs[DATE_KEY]!r} is not YYYY-MM-DD: "
+            f"{line.strip()!r}"
+        )
+    if int(pairs[INDEPENDENT_KEY]) > int(pairs[COUNTER_KEY]):
+        return (
+            f"rule suffix has {INDEPENDENT_KEY} > {COUNTER_KEY} "
+            f"({pairs[INDEPENDENT_KEY]} > {pairs[COUNTER_KEY]}): independent "
+            f"confirmations are a subset of all of them: {line.strip()!r}"
+        )
+    return None
+
 
 # ~1-2k-token hard budget on preferences.md (ticket §5); estimated at
 # the common ~4 chars/token heuristic — deliberately coarse, the budget

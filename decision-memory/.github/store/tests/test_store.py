@@ -166,8 +166,8 @@ class CarveOutTests(unittest.TestCase):
         diff = (
             "--- a/preferences.md\n"
             "+++ b/preferences.md\n"
-            "-- rule text. [confirmed: 3, last: 2026-07-15]\n"
-            "+- rule text. [confirmed: 4, last: 2026-07-20]\n"
+            "-- rule text. [confirmed: 3, independent: 0, last: 2026-07-15]\n"
+            "+- rule text. [confirmed: 4, independent: 0, last: 2026-07-20]\n"
         )
         required, notes = guard.classify_pref_commits(
             [self.commit("pref-confirm: rule text (n=4)", diff)]
@@ -177,8 +177,8 @@ class CarveOutTests(unittest.TestCase):
 
     def test_counter_bump_that_rewrites_the_rule_needs_the_label(self):
         diff = (
-            "-- old rule text. [confirmed: 3, last: 2026-07-15]\n"
-            "+- new rule text. [confirmed: 4, last: 2026-07-20]\n"
+            "-- old rule text. [confirmed: 3, independent: 0, last: 2026-07-15]\n"
+            "+- new rule text. [confirmed: 4, independent: 0, last: 2026-07-20]\n"
         )
         required, _ = guard.classify_pref_commits(
             [self.commit("pref-confirm: rule text (n=4)", diff)]
@@ -1043,7 +1043,7 @@ class SimilarityGateTests(unittest.TestCase):
         preferences = (
             "# Active Preference Set\n\n"
             "- Rejects new infrastructure dependencies unless they remove an "
-            "entire class of maintenance. [confirmed: 3, last: 2026-07-15]\n"
+            "entire class of maintenance. [confirmed: 3, independent: 0, last: 2026-07-15]\n"
         )
         record = self._draft(
             "20260715T143205Z-a",
@@ -1065,7 +1065,7 @@ class SimilarityGateTests(unittest.TestCase):
         """
         preferences = (
             "- Rejects new infrastructure dependencies unless they remove an "
-            "entire class of maintenance. [confirmed: 3, last: 2026-07-15]\n"
+            "entire class of maintenance. [confirmed: 3, independent: 0, last: 2026-07-15]\n"
         )
         record = self._draft(
             "20260715T143205Z-a",
@@ -1168,7 +1168,9 @@ class MeasureInvariantTests(unittest.TestCase):
         Asserting one example would not have caught it. Asserting the
         property across the real length range does.
         """
-        preferences = f"- {self.RULE}. [confirmed: 3, last: 2026-07-15]\n"
+        preferences = (
+            f"- {self.RULE}. [confirmed: 3, independent: 0, last: 2026-07-15]\n"
+        )
         for filler in (0, 10, 20, 30, 40):
             with self.subTest(filler=filler):
                 record = self._record_quoting_the_rule(filler)
@@ -1202,7 +1204,9 @@ class MeasureInvariantTests(unittest.TestCase):
         threshold: a threshold change must not be able to silently
         satisfy the test above while the measure regresses.
         """
-        preferences = f"- {self.RULE}. [confirmed: 3, last: 2026-07-15]\n"
+        preferences = (
+            f"- {self.RULE}. [confirmed: 3, independent: 0, last: 2026-07-15]\n"
+        )
         scores = set()
         for filler in (0, 20, 40):
             record = self._record_quoting_the_rule(filler)
@@ -1411,7 +1415,8 @@ class FixtureStoreTests(unittest.TestCase):
         for record in self.records:
             self._write_record(record)
         self._write(
-            "preferences.md", "- a short rule. [confirmed: 1, last: 2026-07-15]\n"
+            "preferences.md",
+            "- a short rule. [confirmed: 1, independent: 0, last: 2026-07-15]\n",
         )
         self._write("store.config.json", json.dumps({"budget_tokens": 2000}))
 

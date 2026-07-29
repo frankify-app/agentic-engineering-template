@@ -197,7 +197,6 @@ One bracket at the end of a rule bullet, holding comma-separated
 `key: value` pairs:
 
 ```text
-- <rule text> [confirmed: <N>, last: <YYYY-MM-DD>]
 - <rule text> [confirmed: <N>, independent: <N>, last: <YYYY-MM-DD>]
 ```
 
@@ -205,9 +204,10 @@ Grammar, and it is deliberately this small:
 
 - **Flat only.** No nesting, no lists, no objects. A value is a bare
   scalar, so the whole suffix parses by splitting on `,` then `:`.
-- **Order is not significant**, but `last` reads better trailing.
-- **Unknown keys are tolerated**, so a key can be added without a
-  coordinated change to every reader.
+- **Exactly these three keys**, written in this order. A rule carrying
+  fewer, or any key outside the set, fails the guard. A closed set is
+  what keeps the suffix from gaining keys nothing reads; adding one is
+  a deliberate change to the validator, alongside its consumer.
 - **The whole bracket is stripped** before a rule's text is compared to
   anything, so bookkeeping never counts as rule vocabulary.
 
@@ -216,7 +216,7 @@ Keys currently defined:
 | Key | Meaning |
 | --- | --- |
 | `confirmed` | Times the rule predicted the chosen slot |
-| `independent` | Of those, how many were NOT the rule citing itself into the slot that was then chosen. Omitted means unmeasured, which is not the same as zero |
+| `independent` | Of those, how many were NOT the rule citing itself into the slot that was then chosen. Never greater than `confirmed` |
 | `last` | Date of the most recent confirmation |
 
 **Why not YAML or JSON.** Rule text is prose and contains colons
@@ -242,17 +242,22 @@ pairs are the whole affordance.
 
 - Counter-line updates are the ONE sanctioned edit in this repo,
   executed mechanically: `submit` auto-generates `pref-confirm`
-  commits from in-session preference-driven hits; CI validates the
-  counter math (increment by exactly 1, rule text unchanged).
-- A rule only ever confirmed by choices its own recommendation caused
-  has zero independent evidence — extraction flags such rules, never
-  strengthens them (provenance is in the records: `rules_cited` +
-  `chosen_slot`). `independent` is where that distinction becomes
-  visible in the active set rather than only in a pass report.
-- Editing a suffix for any reason OTHER than a mechanical bump — adding
-  `independent`, correcting a count — rewrites an existing line, so it
-  needs the carve-out label and a replay report like any other edit to
-  the active set.
+  commits; CI validates the counter math (increment by exactly 1, rule
+  text unchanged, other keys untouched).
+- `submit` counts two kinds of confirmation, and keeps them apart. A
+  `hit` credits the rules cited on the slot that won — the rule
+  agreeing with the option it authored, which raises `confirmed`
+  alone. The other kind is a rule cited on some option the rule did
+  NOT propose, which the decider chose anyway; that raises
+  `independent` as well. Only the second is evidence the rule tracks
+  the decider rather than steering them.
+- `independent` may rise by at most 1 per bump and never falls. A
+  mechanical bump that lowered it would be erasing evidence under a
+  subject that reads as routine.
+- Editing a suffix for any reason OTHER than a mechanical bump —
+  correcting a count, backfilling a key — rewrites an existing line,
+  so it needs the carve-out label and a replay report like any other
+  edit to the active set.
 - Promotion is separate and human-only: agents write candidate rules
   to `proposals/<YYYY-MM-DD>-<slug>.md` (one rule per file); only a
   human `pref-promote` commit moves content into `preferences.md`.
