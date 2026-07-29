@@ -278,13 +278,47 @@ def _git(*args: str) -> str:
     return result.stdout
 
 
+def _is_shallow(root: str) -> bool:
+    return _git("-C", root, "rev-parse", "--is-shallow-repository").strip() == "true"
+
+
+def _require_complete_history(root: str) -> None:
+    """Refuse to derive a watermark from a truncated history.
+
+    Deriving the watermark instead of storing it buys self-healing: a
+    session merged without a pass is not lost, because the next pass
+    reaches further back. That property depends entirely on the history
+    being complete. Under a shallow clone the walk stops at the boundary
+    and returns None — indistinguishable from "no pass has ever run",
+    and wrong by however much was cut off.
+
+    This is the normal state, not an exotic one: the grilling skill
+    tells sessions to shallow-clone the store.
+
+    Refusing rather than fetching: a `status` command that silently
+    reaches the network is a surprise, and the remedy is one command the
+    caller can run deliberately.
+    """
+    if _is_shallow(root):
+        raise SystemExit(
+            "refusing to derive the watermark: this is a shallow clone, so "
+            "`pref-extract:` commits older than the boundary are invisible and "
+            "the scope would be overstated by however much history is missing. "
+            "Run `git fetch --unshallow` and try again."
+        )
+
+
 def last_extraction_commit(rev_range: str = "HEAD", root: str = ".") -> str | None:
     """SHA of the newest `pref-extract:` commit in `rev_range`, or None.
 
     None means no pass has ever run over that range, which is not an
     error state: it is what the first pass on a fresh corpus sees, and
     it is why bootstrap needs no special mode.
+
+    That reading is only sound over a COMPLETE history, so a shallow
+    clone is refused rather than reported as a bootstrap.
     """
+    _require_complete_history(root)
     out = _git(
         "-C",
         root,

@@ -679,6 +679,48 @@ class ExtractionWatermarkTests(unittest.TestCase):
         self._commit(f"decision(f): case-{suffix} — a")
         return record["id"]
 
+    def test_a_shallow_clone_is_refused_rather_than_guessed_at(self):
+        """A truncated history cannot distinguish "no pass ever ran" from
+        "the pass is older than the boundary" — and the answers differ by
+        the whole corpus.
+
+        Observed on the live store: a shallow clone reported 106 records
+        and no watermark, when five passes had run and the real scope was
+        19. Committing that pass would have re-proposed promoted rules and
+        double-bumped counters, and the merge gate would have allowed it —
+        it checks that a pass commit EXISTS, never that its scope was real.
+
+        The grilling skill tells sessions to shallow-clone the store, so
+        this is the normal state, not an exotic one.
+        """
+        self._add_record("01")
+        self._commit(f"{extraction.EXTRACTION_PREFIX} 1 record", allow_empty=True)
+        later = self._add_record("02")
+
+        # Re-clone shallowly: the pass commit falls outside the boundary.
+        shallow = os.path.join(self.tmp.name, "shallow")
+        subprocess.run(
+            ["git", "clone", "-q", "--depth", "1", f"file://{self.root}", shallow],
+            check=True,
+            capture_output=True,
+        )
+        self.assertEqual(
+            subprocess.run(
+                ["git", "-C", shallow, "rev-parse", "--is-shallow-repository"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip(),
+            "true",
+            "fixture must actually be shallow, or this test proves nothing",
+        )
+
+        with self.assertRaises(SystemExit) as caught:
+            extraction.scope_ids(shallow)
+        self.assertIn("shallow", str(caught.exception).lower())
+        self.assertIn("unshallow", str(caught.exception))
+        del later
+
     def test_no_pass_ever_means_the_whole_corpus(self):
         """Bootstrap is not a mode — it is what an empty history means."""
         first = self._add_record("01")
