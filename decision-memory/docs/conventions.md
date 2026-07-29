@@ -188,9 +188,58 @@ everywhere — new optional fields need no migration.
   reads that value, so the budget is checked in exactly one place
   against exactly one authority. Promoting a rule at budget means
   merging or demoting another ("promote requires demote").
-- Rules are conditional and falsifiable, one bullet each, with a
-  confirmation counter and last-confirmed date:
-  `[confirmed: <N>, last: <YYYY-MM-DD>]`.
+- Rules are conditional and falsifiable, one bullet each, carrying a
+  metadata suffix.
+
+### The metadata suffix
+
+One bracket at the end of a rule bullet, holding comma-separated
+`key: value` pairs:
+
+```text
+- <rule text> [confirmed: <N>, last: <YYYY-MM-DD>]
+- <rule text> [confirmed: <N>, independent: <N>, last: <YYYY-MM-DD>]
+```
+
+Grammar, and it is deliberately this small:
+
+- **Flat only.** No nesting, no lists, no objects. A value is a bare
+  scalar, so the whole suffix parses by splitting on `,` then `:`.
+- **Order is not significant**, but `last` reads better trailing.
+- **Unknown keys are tolerated**, so a key can be added without a
+  coordinated change to every reader.
+- **The whole bracket is stripped** before a rule's text is compared to
+  anything, so bookkeeping never counts as rule vocabulary.
+
+Keys currently defined:
+
+| Key | Meaning |
+| --- | --- |
+| `confirmed` | Times the rule predicted the chosen slot |
+| `independent` | Of those, how many were NOT the rule citing itself into the slot that was then chosen. Omitted means unmeasured, which is not the same as zero |
+| `last` | Date of the most recent confirmation |
+
+**Why not YAML or JSON.** Rule text is prose and contains colons
+(`Scopes work to the demonstrated problem: declines to build…`), dashes
+and parentheses, so a structured format would need every value quoted —
+one unquoted colon silently changes the parse. This file is also the
+only one injected into agent context, under a hard token budget, and
+structural characters spend budget that should hold rules. Markdown
+bullets are the cheapest encoding of "a list of conditional statements",
+which is what the file is.
+
+**Why not a sidecar.** A separate metadata file would have to key on
+rule *text*, and rule text changes whenever a rule is conditionalized —
+precisely when its counter matters most. It would also put one fact in
+two places.
+
+**When to revisit.** If the suffix ever needs nesting — a list, or a
+value with internal structure — markdown-with-suffix has stopped being
+the right shape and a structured format should be reconsidered. Flat
+pairs are the whole affordance.
+
+### Counter updates
+
 - Counter-line updates are the ONE sanctioned edit in this repo,
   executed mechanically: `submit` auto-generates `pref-confirm`
   commits from in-session preference-driven hits; CI validates the
@@ -198,7 +247,12 @@ everywhere — new optional fields need no migration.
 - A rule only ever confirmed by choices its own recommendation caused
   has zero independent evidence — extraction flags such rules, never
   strengthens them (provenance is in the records: `rules_cited` +
-  `chosen_slot`).
+  `chosen_slot`). `independent` is where that distinction becomes
+  visible in the active set rather than only in a pass report.
+- Editing a suffix for any reason OTHER than a mechanical bump — adding
+  `independent`, correcting a count — rewrites an existing line, so it
+  needs the carve-out label and a replay report like any other edit to
+  the active set.
 - Promotion is separate and human-only: agents write candidate rules
   to `proposals/<YYYY-MM-DD>-<slug>.md` (one rule per file); only a
   human `pref-promote` commit moves content into `preferences.md`.
