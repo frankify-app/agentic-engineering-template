@@ -553,3 +553,96 @@ def test_precommit_none_omits_prek_bootstrap(
         for hook in group["hooks"]
     ]
     assert not any("ensure-prek.sh" in command for command in commands)
+
+
+# ------------------ org plumbing: labels + board auto-add ------------------
+
+
+def test_github_forge_ships_label_config_and_sync_workflow(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """Labels are config-as-code so the taxonomy is one file, not seven
+    clicked-in sets that drift."""
+    dst_path = _render(tmp_path, base_answers, "labels-github")
+
+    _check_file_contents(
+        dst_path / ".github" / "labels.toml",
+        [
+            # Triage taxonomy — the evidence store's `triage` values, so a
+            # record and its ticket classify the same way.
+            "code-bug",
+            "doc-bug",
+            "expectation-bug",
+            "feature",
+            # The quarantine lane's marker (agentic-engineering-template#62).
+            "needs-human-review",
+            # Kept deliberately: these are what Dependabot applies.
+            "dependencies",
+            "github_actions",
+        ],
+    )
+    _check_file_contents(
+        dst_path / ".github" / "workflows" / "labels.yml",
+        [
+            # Only fires when the taxonomy itself changes.
+            ".github/labels.toml",
+            "workflow_dispatch",
+            "LABELS_TOKEN",
+        ],
+    )
+
+
+def test_label_sync_is_skipped_rather_than_failed_without_its_token(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """A repo that never sets the org secret must not show a permanently
+    red workflow — but the job has to be visibly SKIPPED, never a silent
+    green, or the absence of the sync reads as a successful sync."""
+    dst_path = _render(tmp_path, base_answers, "labels-guard")
+
+    _check_file_contents(
+        dst_path / ".github" / "workflows" / "labels.yml",
+        ["if: ${{ vars.LABELS_SYNC_ENABLED == 'true' }}"],
+    )
+
+
+def test_github_forge_ships_board_auto_add_workflow(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """GitHub's built-in auto-add is plan-limited to one repository, so
+    the board is populated by an action instead."""
+    dst_path = _render(tmp_path, base_answers, "board-github")
+
+    _check_file_contents(
+        dst_path / ".github" / "workflows" / "add-to-project.yml",
+        [
+            "actions/add-to-project",
+            # The default GITHUB_TOKEN is repo-scoped and cannot write to
+            # an ORG-level project.
+            "PROJECT_BOARD_TOKEN",
+            "vars.PROJECT_BOARD_URL",
+            # Fork PRs carry no secrets under `pull_request`; the base-context
+            # event is what makes the token reachable. Safe here only because
+            # nothing checks out PR code.
+            "pull_request_target",
+        ],
+    )
+
+
+def test_forgejo_forge_ships_no_github_org_plumbing(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """Both workflows are GitHub-specific: `labels` targets the GitHub
+    API and Projects V2 has no Forgejo counterpart."""
+    answers = {
+        **base_answers,
+        "agentic_forge": "forgejo",
+        "agentic_forgejo_host": "codeberg.org",
+    }
+    dst_path = _render(tmp_path, answers, "no-plumbing-forgejo")
+
+    assert not (dst_path / ".github").exists()
