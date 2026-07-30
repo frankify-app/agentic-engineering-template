@@ -12,6 +12,8 @@ from pathlib import Path
 
 import copier
 
+from tests.conftest import load_module
+
 PROJECT_ROOT = Path(__file__).parent.parent
 
 STORE_FILES = frozenset(
@@ -183,3 +185,20 @@ def test_default_render_contains_no_recorder(
     stores through the decision-memory subtemplate, never to consumer repos."""
     dst_path = render_project()
     assert not (dst_path / "tools" / "record.py").exists()
+
+
+def test_a_predictions_only_pr_needs_no_extraction_pass(tmp_path) -> None:
+    """The extraction gate keys on decisions/, so an autonomous run's
+    records never demand a pass they have no business in."""
+    extraction = load_module(
+        "extraction",
+        PROJECT_ROOT / "decision-memory" / ".github" / "store" / "extraction.py",
+    )
+    assert extraction.DECISIONS_DIR == "decisions"
+    source = (
+        PROJECT_ROOT / "decision-memory" / ".github" / "store" / "extraction.py"
+    ).read_text()
+    assert "predictions" not in source, (
+        "extraction must not know about predictions/ at all — the "
+        "exclusion is structural, not a filter someone must remember"
+    )

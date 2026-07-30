@@ -19,8 +19,11 @@ Verbs:
            one commit per record, each pushed as it lands so the
            clone holds nothing the remote does not; batch-local slug
            references (supersedes_slug, drill_down_of_slug,
-           related_slugs) resolve to the minted IDs
-  check    validate the entire decisions/ corpus + dangling refs +
+           related_slugs) resolve to the minted IDs. `--predict`
+           writes to predictions/ instead: an autonomous run's own
+           choices under the active preference set, with no decider
+           present — replay material, never preference input
+  check    validate both record corpora + dangling refs +
            preferences.md token budget
   submit   compute two-stream hit rates (refined and near-tie
            bucketed separately), auto-bump pref-confirm counters for
@@ -452,9 +455,9 @@ def cmd_open(args: argparse.Namespace) -> int:
     return 0
 
 
-def commit_record(repo_dir: Path, record: dict) -> None:
+def commit_record(repo_dir: Path, record: dict, directory: str = "decisions") -> None:
     record_id = record["id"]
-    path = repo_dir / "decisions" / f"{record_id}.json"
+    path = repo_dir / directory / f"{record_id}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         raise fail(f"{path} already exists — records are immutable")
@@ -465,7 +468,8 @@ def commit_record(repo_dir: Path, record: dict) -> None:
         chosen = chosen[:99] + "…"
     # Subject grammar authority: the store's docs/conventions.md
     # (§ Commit types); the vendored guard lints what this composes.
-    subject = f"decision({record['project']}): {slug} — {chosen}"
+    kind = "decision" if directory == "decisions" else "prediction"
+    subject = f"{kind}({record['project']}): {slug} — {chosen}"
     run_git(repo_dir, "add", str(path))
     run_git(repo_dir, "commit", "--quiet", "-m", subject)
     push_session(repo_dir)
@@ -498,6 +502,14 @@ def push_session(repo_dir: Path) -> None:
 
 
 def cmd_record(args: argparse.Namespace) -> int:
+    """Write decision records, or predictions with ``--predict``.
+
+    Predictions land in a separate corpus with the same schema and the
+    same append-only guarantee. They are what an autonomous run chose
+    under the active preference set with no decider present — replay
+    material, never preference input, so nothing downstream may read
+    them as rulings.
+    """
     repo_dir = store_root()
     state = load_state(repo_dir)
     validator = load_validator(repo_dir)
@@ -534,8 +546,9 @@ def cmd_record(args: argparse.Namespace) -> int:
         )
         return 1
 
+    directory = "predictions" if getattr(args, "predict", False) else "decisions"
     for record in records:
-        commit_record(repo_dir, record)
+        commit_record(repo_dir, record, directory)
     return 0
 
 
@@ -544,14 +557,19 @@ def cmd_check(args: argparse.Namespace) -> int:
     validator = load_validator(repo_dir)
 
     errors: list[str] = []
-    decisions_dir = repo_dir / "decisions"
     records: dict[str, dict] = {}
-    if decisions_dir.is_dir():
-        for path in sorted(decisions_dir.iterdir()):
+    # Both corpora share the ID namespace and the link graph, so they
+    # validate together: a prediction may reference a decision, and a
+    # dangling link is dangling either way.
+    for directory in ("decisions", "predictions"):
+        corpus = repo_dir / directory
+        if not corpus.is_dir():
+            continue
+        for path in sorted(corpus.iterdir()):
             if path.name.startswith("."):
                 continue
             if path.suffix != ".json":
-                errors.append(f"{path.name}: non-JSON file in decisions/")
+                errors.append(f"{path.name}: non-JSON file in {path.parent.name}/")
                 continue
             try:
                 record = json.loads(path.read_text(encoding="utf-8"))
@@ -754,6 +772,9 @@ def cmd_submit(args: argparse.Namespace) -> int:
         "--",
         "decisions/",
     ).split()
+    # Scoped to decisions/ deliberately: a prediction is an agent's own
+    # choice, and letting one reach the counters would be the rule
+    # confirming itself through a second door.
     records = []
     for name in added:
         path = repo_dir / name
@@ -896,6 +917,12 @@ def main(argv: list[str] | None = None) -> int:
         dest="from_file",
         help="JSON file with a draft record or an array of drafts "
         "(default: read stdin)",
+    )
+    p_record.add_argument(
+        "--predict",
+        action="store_true",
+        help="write to predictions/ instead of decisions/: an autonomous "
+        "run's own choices, replay material only, never preference input",
     )
     p_record.set_defaults(func=cmd_record)
 

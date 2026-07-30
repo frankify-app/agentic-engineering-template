@@ -40,6 +40,14 @@ RECORD_TYPE = "decision"
 LINK_FIELDS = ("related", "supersedes", "drill_down_of")
 STORE_DIR = "decisions"
 
+# Autonomous agent records: same schema, same append-only guarantee,
+# outside the preference pipeline entirely. A run with no decider
+# present is a prediction under the active set, not a ruling — so
+# extraction never walks this directory and no record in it can bump a
+# counter. Naming it for what it holds keeps `decisions/` meaning
+# a-human-ruled.
+PREDICTIONS_DIR = "predictions"
+
 REQUIRED_FIELDS = (
     "v",
     "type",

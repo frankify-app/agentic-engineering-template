@@ -159,3 +159,53 @@ def test_a_wrapped_rule_is_checked_as_one_bullet() -> None:
         guards.decision_validator.check_metadata_suffix(guards._rule_bullets(text)[0])
         is None
     )
+
+
+# --- the predictions corpus ------------------------------------------
+# An autonomous run's own choices: same schema, same append-only
+# guarantee, outside the preference pipeline entirely.
+
+
+def test_predictions_are_append_only_too() -> None:
+    assert guards.APPEND_ONLY_DIRS == ("decisions/", "predictions/")
+
+
+def test_the_prediction_commit_type_is_accepted() -> None:
+    assert guards.check_commit_subject("prediction(factory): a-slug — chosen") is None
+
+
+def test_a_prediction_subject_still_needs_its_scope_and_chosen() -> None:
+    assert guards.check_commit_subject("prediction: no scope") is not None
+    assert guards.check_commit_subject("prediction(factory): no separator") is not None
+
+
+def test_both_corpora_validate_and_share_the_link_graph(tmp_path) -> None:
+    import json as _json
+
+    record = {
+        "v": 1,
+        "type": "decision",
+        "id": "20260730T000000Z-a",
+        "date": "2026-07-30",
+        "project": "factory",
+        "question": "q",
+        "options": [
+            {"slot": 1, "label": "x", "role": "prediction", "rules_cited": []},
+        ],
+        "prediction_stream": "cold",
+        "artifact_ref": None,
+        "chosen_slot": 1,
+        "chosen": "x",
+        "rejections": [],
+        "outcome": "hit",
+    }
+    (tmp_path / "predictions").mkdir()
+    # A prediction whose `related` points nowhere must be caught, which
+    # only happens if predictions enter the same link graph.
+    dangling = dict(record, id="20260730T000001Z-b", related=["20260730T000009Z-ghost"])
+    (tmp_path / "predictions" / f"{dangling['id']}.json").write_text(
+        _json.dumps(dangling)
+    )
+    (tmp_path / "store.config.json").write_text('{"budget_tokens": 2000}')
+    errors = guards.check_corpus(str(tmp_path))
+    assert any("ghost" in error for error in errors), errors
