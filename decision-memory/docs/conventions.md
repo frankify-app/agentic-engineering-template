@@ -15,6 +15,19 @@ subtemplate and change together there, in the same PR.
 - `decisions/<id>.json` — one immutable JSON **file** per decision,
   flat directory. Append-only: existing files are NEVER modified,
   deleted, or renamed.
+- `predictions/<id>.json` — the same schema and the same append-only
+  guarantee, for what an AUTONOMOUS run chose under the active
+  preference set with no decider present. Written by
+  `record.py record --predict`, committed as
+  `prediction(<project>): …`.
+
+  A prediction is not a ruling, so it stays outside the preference
+  pipeline entirely: extraction never walks the directory, no
+  prediction can bump a counter, and a PR adding only predictions needs
+  no extraction pass. It is replay material — the records carry
+  `preference_set.commit`, so a candidate rule set can be run against
+  them to see what an agent WOULD have chosen. Keeping the corpora
+  apart is what lets `decisions/` keep meaning a-human-ruled.
 - ID = filename stem = `<timestamp>-<slug>`, e.g.
   `20260715T143205Z-agent-access`. The slug is a writer-chosen
   kebab-case title, ≤40 chars; the timestamp is minted (UTC) by the

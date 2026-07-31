@@ -7,17 +7,19 @@ the guard must keep working even if the template repo disappears.
 
 Checks, per PR (run with --base <base-sha> from a full checkout):
 
-1. Append-only: no modify/delete/rename under decisions/**; line
+1. Append-only: no modify/delete/rename under decisions/** or
+   predictions/**; line
    removals in preferences.md only from pref-confirm/pref-promote/
    pref-compact commits, with pref-confirm counter math validated
    mechanically.
-2. Full-corpus schema check: EVERY decisions/*.json validates (not
-   just added files), so guard updates re-validate the entire corpus.
+2. Full-corpus schema check: EVERY decisions/*.json and
+   predictions/*.json validates (not just added files), so guard
+   updates re-validate the entire corpus.
 3. Dangling-reference check across the corpus.
 4. Token budget on preferences.md, against the repo-local budget.
 5. Commit lint: every PR commit subject uses one of the repo's own
-   types (decision/pref-proposal/pref-promote/pref-confirm/
-   pref-compact/pref-drift/pref-extract/chore).
+   types (decision/prediction/pref-proposal/pref-promote/
+   pref-confirm/pref-compact/pref-drift/pref-extract/chore).
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ import decision_validator  # noqa: E402  (path bootstrap above)
 # writer composes these subjects in record.py.
 COMMIT_SUBJECT_RES = (
     re.compile(r"^decision\([a-z0-9][a-z0-9-]*\): .+ — .+$"),
+    re.compile(r"^prediction\([a-z0-9][a-z0-9-]*\): .+ — .+$"),
     re.compile(r"^pref-proposal: .+$"),
     re.compile(r"^pref-promote: .+$"),
     re.compile(r"^pref-confirm: .+ \(n=\d+\)$"),
@@ -74,7 +77,8 @@ def check_commit_subject(subject: str) -> str | None:
         return None
     return (
         f"commit subject {subject!r} matches none of the repo's types: "
-        "decision(<project>): <slug> — <chosen> | pref-proposal: | "
+        "decision(<project>): <slug> — <chosen> | "
+        "prediction(<project>): <slug> — <chosen> | pref-proposal: | "
         "pref-promote: | pref-confirm: ... (n=N) | pref-compact: | "
         "pref-drift: | pref-extract: | chore:"
     )
@@ -185,17 +189,30 @@ def _git(*args: str) -> str:
     return result.stdout
 
 
+APPEND_ONLY_DIRS = (
+    f"{decision_validator.STORE_DIR}/",
+    f"{decision_validator.PREDICTIONS_DIR}/",
+)
+
+
 def check_append_only(base: str) -> list[str]:
-    """No modify/delete/rename ever touches existing decision records."""
+    """No modify/delete/rename ever touches a recorded ruling.
+
+    Predictions are covered too: an agent's recorded choice is the
+    input a counterfactual replay reads, and a corpus that can be
+    quietly rewritten cannot support one.
+    """
     errors: list[str] = []
     diff = _git("diff", "--name-status", "--find-renames", f"{base}...HEAD")
     for line in diff.splitlines():
         parts = line.split("\t")
         status = parts[0]
         paths = parts[1:]
-        if any(p.startswith("decisions/") for p in paths) and not (status == "A"):
+        touched = [p for p in paths if p.startswith(APPEND_ONLY_DIRS)]
+        if touched and status != "A":
+            directory = touched[0].split("/", 1)[0]
             errors.append(
-                f"append-only: decisions/ change {status} {' '.join(paths)} "
+                f"append-only: {directory}/ change {status} {' '.join(paths)} "
                 "— existing records are never modified, deleted, or renamed"
             )
     return errors
@@ -229,8 +246,43 @@ def check_commits(base: str) -> list[str]:
     return errors
 
 
+def _check_records_in(root: str, directory: str, records: dict[str, dict]) -> list[str]:
+    """Validate every record in one corpus directory.
+
+    Records from both directories share the ID namespace and the link
+    graph, so they accumulate into one ``records`` map: a prediction
+    may reference a decision, and a dangling link is dangling either
+    way.
+    """
+    errors: list[str] = []
+    path_dir = os.path.join(root, directory)
+    if not os.path.isdir(path_dir):
+        return errors
+    for name in sorted(os.listdir(path_dir)):
+        if name.startswith("."):
+            continue
+        path = os.path.join(path_dir, name)
+        if not name.endswith(".json"):
+            errors.append(f"{path}: non-JSON file in {directory}/")
+            continue
+        stem = name[: -len(".json")]
+        try:
+            with open(path, encoding="utf-8") as handle:
+                record = json.load(handle)
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"{path}: unreadable or invalid JSON: {exc}")
+            continue
+        errors.extend(
+            f"{path}: {e}"
+            for e in decision_validator.validate_record(record, filename_stem=stem)
+        )
+        if isinstance(record, dict) and isinstance(record.get("id"), str):
+            records[record["id"]] = record
+    return errors
+
+
 def check_corpus(root: str = ".") -> list[str]:
-    """Validate the ENTIRE decisions/ corpus + refs + token budget.
+    """Validate BOTH record corpora + refs + token budget.
 
     The token budget comes from the repo-local `store.config.json`
     (`budget_tokens`), not from a constant in this file: the budget is
@@ -244,29 +296,9 @@ def check_corpus(root: str = ".") -> list[str]:
         config = store_config.load_config(root)
     except store_config.ConfigError as exc:
         return [str(exc)]
-    decisions_dir = os.path.join(root, "decisions")
-    if os.path.isdir(decisions_dir):
-        for name in sorted(os.listdir(decisions_dir)):
-            if name.startswith("."):
-                continue
-            path = os.path.join(decisions_dir, name)
-            if not name.endswith(".json"):
-                errors.append(f"{path}: non-JSON file in decisions/")
-                continue
-            stem = name[: -len(".json")]
-            try:
-                with open(path, encoding="utf-8") as handle:
-                    record = json.load(handle)
-            except (OSError, json.JSONDecodeError) as exc:
-                errors.append(f"{path}: unreadable or invalid JSON: {exc}")
-                continue
-            errors.extend(
-                f"{path}: {e}"
-                for e in decision_validator.validate_record(record, filename_stem=stem)
-            )
-            if isinstance(record, dict) and isinstance(record.get("id"), str):
-                records[record["id"]] = record
-        errors.extend(decision_validator.validate_corpus(records))
+    for directory in (decision_validator.STORE_DIR, decision_validator.PREDICTIONS_DIR):
+        errors.extend(_check_records_in(root, directory, records))
+    errors.extend(decision_validator.validate_corpus(records))
     preferences_path = os.path.join(root, "preferences.md")
     if os.path.isfile(preferences_path):
         with open(preferences_path, encoding="utf-8") as handle:
