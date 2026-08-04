@@ -63,7 +63,8 @@ is done when its ticket says so, and noticing it should not depend on
 an agent session happening to be running. Stamped repos report their
 ticket closes here by `repository_dispatch` — the template ships that
 sender, and it resolves this store from the `SESSION_MEMORY_REPO`
-variable — and the receiver answers each one by checking every live
+variable — and the receiver, `.github/workflows/close-loop.yml`,
+answers each one by checking every live
 thread's ticket, appending `completed`, or `dropped` for a ticket
 closed as not planned.
 
