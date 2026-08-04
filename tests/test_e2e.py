@@ -55,6 +55,7 @@ GITHUB_ONLY_FILES = frozenset(
         ".github/workflows/add-to-project.yml",
         ".github/workflows/labels.yml",
         ".github/workflows/lint.yml",
+        ".github/workflows/ticket-closed.yml",
     }
 )
 
