@@ -1,0 +1,63 @@
+name: Render ledger
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # Only the sources. LEDGER.md is the OUTPUT and is deliberately
+      # absent here, so the commit this job makes cannot retrigger it.
+      - "ledger/**"
+      - "repo-codes.json"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: render-ledger
+  cancel-in-progress: true
+
+jobs:
+  render:
+    name: "LEDGER.md"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Fetch the renderer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The tool lives with the skill, not with the data — one
+          # source, and this store never carries a second copy to
+          # drift from it. `<owner>/skills` is the convention for
+          # where the thread-ledger skill lives.
+          git clone --depth 1 --filter=blob:none --sparse \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository_owner }}/skills.git" \
+            /tmp/skills
+          git -C /tmp/skills sparse-checkout set original/thread-ledger
+
+      - name: Render
+        run: |
+          set -euo pipefail
+          # The identity comes from the store's own recorded URL, so this
+          # names no session; the title carries the owner, not a baked-in
+          # org name.
+          node /tmp/skills/original/thread-ledger/ledger.mjs \
+            --root . \
+            render --format md --out LEDGER.md \
+            --title "${{ github.repository_owner }} — thread ledger"
+
+      - name: Commit when it changed
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- LEDGER.md; then
+            echo "LEDGER.md already current — nothing to commit."
+            exit 0
+          fi
+          git config user.name "thread-ledger"
+          git config user.email "noreply@anthropic.com"
+          git add LEDGER.md
+          git commit -m "chore: render LEDGER.md"
+          git push

@@ -24,12 +24,14 @@ SUBTEMPLATE = PROJECT_ROOT / "session-memory"
 STORE_FILES = frozenset(
     {
         ".copier-answers.agentic.yml",
+        ".github/workflows/render-ledger.yml",
         ".github/workflows/template-update.yml",
         ".github/workflows/ticket-closed.yml",
         ".gitignore",
         "AGENTS.md",
         "CLAUDE.md",
         "README.md",
+        "repo-codes.json",
     }
 )
 
@@ -93,6 +95,27 @@ def test_the_readme_is_vendored(tmp_path: Path) -> None:
     assert (dst_path / "README.md").read_text() == (
         SUBTEMPLATE / "README.md"
     ).read_text()
+
+
+def test_the_shortcode_map_is_seeded_once(tmp_path: Path) -> None:
+    """`repo-codes.json` is the store's data, not the template's: the
+    org's own shortcode entries live there, and a recopy that clobbered
+    them would silently rename every ticket in the rendered view."""
+    dst_path = _render_store(tmp_path)
+    store_owned = '{"my-org/my-repo": "MR"}\n'
+    (dst_path / "repo-codes.json").write_text(store_owned)
+
+    copier.run_recopy(
+        dst_path=dst_path,
+        answers_file=".copier-answers.agentic.yml",
+        defaults=True,
+        unsafe=True,
+        skip_tasks=True,
+        overwrite=True,
+        vcs_ref="HEAD",
+    )
+
+    assert (dst_path / "repo-codes.json").read_text() == store_owned
 
 
 def test_the_store_names_no_organisation(tmp_path: Path) -> None:

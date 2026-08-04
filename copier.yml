@@ -155,6 +155,9 @@ _skip_if_exists:
   # budget a human tuned.
   - "{% if agentic_subtemplate == 'decision-memory' %}preferences.md{% endif %}"
   - "{% if agentic_subtemplate == 'decision-memory' %}store.config.json{% endif %}"
+  # The shortcode map is the store's data — the template seeds an empty
+  # scaffold and never overwrites the org's own entries.
+  - "{% if agentic_subtemplate == 'session-memory' %}repo-codes.json{% endif %}"
 _jinja_extensions:
   - copier_template_extensions.TemplateExtensionLoader
   - extensions/agentic.py:AgenticExtension

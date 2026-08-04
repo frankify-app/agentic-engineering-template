@@ -36,6 +36,14 @@ rejects an entry that claims neither.
   conversation. They carry `by:` and no session URL, because there is
   no conversation to link to.
 - `transcripts/<session-id>/` — exported conversation text.
+- `LEDGER.md` — the folded state as markdown. Rendered, not written:
+  `.github/workflows/render-ledger.yml` regenerates it on every push
+  that touches the sources, so edits to it are overwritten on the next
+  push.
+- `repo-codes.json` — short codes for ticket prefixes in the rendered
+  view. Seeded once and store-owned, because the template ships no
+  org's names; an unmapped repo renders under its own name, so a
+  missing entry is visible rather than silently wrong.
 
 ## How it is written
 
@@ -54,7 +62,8 @@ A workflow closes a thread when the thread's own ticket closes: work
 is done when its ticket says so, and noticing it should not depend on
 an agent session happening to be running. Stamped repos report their
 ticket closes here by `repository_dispatch` — the template ships that
-sender — and the receiver answers each one by checking every live
+sender, and it resolves this store from the `SESSION_MEMORY_REPO`
+variable — and the receiver answers each one by checking every live
 thread's ticket, appending `completed`, or `dropped` for a ticket
 closed as not planned.
 
