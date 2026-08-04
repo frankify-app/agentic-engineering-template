@@ -126,63 +126,97 @@ jobs:
               >> /tmp/plan.jsonl
           done < /tmp/live.jsonl
 
-      - name: Append the terminal events
+      - name: Append the terminal events and commit them
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           ledger() { node /tmp/skills/original/thread-ledger/ledger.mjs --root . "$@"; }
 
-          : > /tmp/appended.txt
-          while read -r row; do
-            ticket=$(jq -r .ticket <<<"$row")
-            terminal=$(jq -r .terminal <<<"$row")
-            while read -r item; do
-              thread=$(jq -r .thread <<<"$item")
-              state=$(jq -r .state <<<"$item")
+          # The commit is created through the API, not the git CLI:
+          # createCommitOnBranch commits are signed by GitHub and show
+          # as Verified, so the store can require verified signatures
+          # without exempting this bot. expectedHeadOid makes the write
+          # compare-and-swap: if main moves mid-run (a session pushed,
+          # the render bot committed), the mutation fails cleanly, the
+          # clone re-syncs, and the sweep re-applies against the fresh
+          # fold — the dispatch-as-wake-up design makes that re-apply
+          # safe, and nobody's history is ever rebased away.
+          for attempt in 1 2 3; do
+            : > /tmp/appended.txt
+            # Re-read the fold on every attempt: after a re-sync another
+            # writer may already have closed some of these threads.
+            ledger state > /tmp/state.json
+            while read -r row; do
+              ticket=$(jq -r .ticket <<<"$row")
+              terminal=$(jq -r .terminal <<<"$row")
+              while read -r item; do
+                thread=$(jq -r .thread <<<"$item")
+                state=$(jq -r --arg t "$thread" \
+                  '.[] | select(.thread == $t) | .state' /tmp/state.json)
 
-              # `completed` is illegal from `blocked` and from `parked`,
-              # and rightly so: a blocker that was never cleared is a
-              # blocker nobody looked at again. The board says the work
-              # shipped, so the blocker no longer holds — which is what
-              # `unblocked` records. Written as the legal two-step
-              # rather than carved out of the state machine, because a
-              # carve-out weakens the rule for every writer to serve
-              # this one.
-              if [ "$state" = "blocked" ] || [ "$state" = "parked" ]; then
-                ledger append --ev unblocked --thread "$thread" --by bot --no-push \
-                  --note "${ticket} is closed, so whatever this was waiting on no longer holds."
-              fi
+                case "$state" in
+                  "" | completed | dropped) continue ;;
+                esac
 
-              ledger append --ev "$terminal" --thread "$thread" --by bot --no-push \
-                --note "${ticket} closed; recorded by the close-loop workflow, not by a session."
+                # `completed` is illegal from `blocked` and from `parked`,
+                # and rightly so: a blocker that was never cleared is a
+                # blocker nobody looked at again. The board says the work
+                # shipped, so the blocker no longer holds — which is what
+                # `unblocked` records. Written as the legal two-step
+                # rather than carved out of the state machine, because a
+                # carve-out weakens the rule for every writer to serve
+                # this one.
+                if [ "$state" = "blocked" ] || [ "$state" = "parked" ]; then
+                  ledger append --ev unblocked --thread "$thread" --by bot --no-push \
+                    --note "${ticket} is closed, so whatever this was waiting on no longer holds."
+                fi
 
-              echo "- \`${thread}\` -> ${terminal} (${ticket})" >> /tmp/appended.txt
-            done < <(jq -c '.threads[]' <<<"$row")
-          done < /tmp/plan.jsonl
+                ledger append --ev "$terminal" --thread "$thread" --by bot --no-push \
+                  --note "${ticket} closed; recorded by the close-loop workflow, not by a session."
 
-      - name: Push what changed
-        run: |
-          set -euo pipefail
-          git add ledger/
-          # Nothing staged is the ordinary outcome, not a failure: most
-          # runs find every live thread's ticket still open.
-          if git diff --cached --quiet; then
-            echo "No thread changed state."
-            exit 0
-          fi
-          git config user.name "thread-ledger"
-          git config user.email "noreply@anthropic.com"
-          git commit -m "ledger(bot): close threads whose tickets closed" \
-            -m "$(cat /tmp/appended.txt)"
+                echo "- \`${thread}\` -> ${terminal} (${ticket})" >> /tmp/appended.txt
+              done < <(jq -c '.threads[]' <<<"$row")
+            done < /tmp/plan.jsonl
 
-          # Sessions push to this store continuously, and the render job
-          # commits behind us. Rebase and retry rather than force: the
-          # log is append-only and losing someone else's line to win a
-          # race is the one outcome worth failing over.
-          for _ in 1 2 3; do
-            if git push; then exit 0; fi
-            git pull --rebase
+            git add ledger/
+            # Nothing staged is the ordinary outcome, not a failure: most
+            # runs find every live thread's ticket still open.
+            if git diff --cached --quiet; then
+              echo "No thread changed state."
+              exit 0
+            fi
+
+            head="$(git rev-parse HEAD)"
+            printf '[]' > /tmp/additions.json
+            while IFS=$'\t' read -r status path; do
+              [ -z "$status" ] && continue
+              jq --arg p "$path" --arg c "$(base64 -w0 "$path")" \
+                '. + [{path: $p, contents: $c}]' /tmp/additions.json \
+                > /tmp/a.json && mv /tmp/a.json /tmp/additions.json
+            done < <(git -c core.quotePath=false diff --cached --name-status)
+
+            jq -n \
+              --slurpfile adds /tmp/additions.json \
+              --arg repo "$GITHUB_REPOSITORY" \
+              --arg head "$head" \
+              --rawfile body /tmp/appended.txt \
+              '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
+                variables: {input: {
+                  branch: {repositoryNameWithOwner: $repo, branchName: "main"},
+                  expectedHeadOid: $head,
+                  message: {headline: "ledger(bot): close threads whose tickets closed", body: $body},
+                  fileChanges: {additions: $adds[0]}}}}' \
+              > /tmp/graphql.json
+            if gh api graphql --input /tmp/graphql.json --silent; then
+              exit 0
+            fi
+            echo "main moved under the sweep (attempt $attempt) — re-syncing."
+            git fetch origin main
+            git reset --hard origin/main
           done
-          git push
+          echo "::error::could not commit the sweep after 3 attempts"
+          exit 1
 
       - name: Say what happened
         if: always()

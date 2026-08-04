@@ -50,14 +50,44 @@ jobs:
             --title "${{ github.repository_owner }} — thread ledger"
 
       - name: Commit when it changed
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- LEDGER.md; then
-            echo "LEDGER.md already current — nothing to commit."
-            exit 0
-          fi
-          git config user.name "thread-ledger"
-          git config user.email "noreply@anthropic.com"
-          git add LEDGER.md
-          git commit -m "chore: render LEDGER.md"
-          git push
+          # The commit is created through the API, not the git CLI:
+          # createCommitOnBranch commits are signed by GitHub and show
+          # as Verified, so the store can require verified signatures
+          # without exempting this bot. expectedHeadOid makes the write
+          # compare-and-swap: if main moved (a session pushed, the
+          # close-loop committed), the mutation fails cleanly and the
+          # run re-syncs and re-renders — nobody's history is rebased.
+          for attempt in 1 2 3; do
+            if git diff --quiet -- LEDGER.md; then
+              echo "LEDGER.md already current — nothing to commit."
+              exit 0
+            fi
+            head="$(git rev-parse HEAD)"
+            jq -n \
+              --arg repo "$GITHUB_REPOSITORY" \
+              --arg head "$head" \
+              --arg c "$(base64 -w0 LEDGER.md)" \
+              '{query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid } } }",
+                variables: {input: {
+                  branch: {repositoryNameWithOwner: $repo, branchName: "main"},
+                  expectedHeadOid: $head,
+                  message: {headline: "chore: render LEDGER.md"},
+                  fileChanges: {additions: [{path: "LEDGER.md", contents: $c}]}}}}' \
+              > /tmp/graphql.json
+            if gh api graphql --input /tmp/graphql.json --silent; then
+              exit 0
+            fi
+            echo "main moved under the render (attempt $attempt) — re-syncing."
+            git fetch origin main
+            git reset --hard origin/main
+            node /tmp/skills/original/thread-ledger/ledger.mjs \
+              --root . \
+              render --format md --out LEDGER.md \
+              --title "${{ github.repository_owner }} — thread ledger"
+          done
+          echo "::error::could not commit LEDGER.md after 3 attempts"
+          exit 1
