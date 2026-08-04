@@ -155,11 +155,6 @@ _skip_if_exists:
   # budget a human tuned.
   - "{% if agentic_subtemplate == 'decision-memory' %}preferences.md{% endif %}"
   - "{% if agentic_subtemplate == 'decision-memory' %}store.config.json{% endif %}"
-  # The session store's README describes THAT store — which sibling
-  # stores it sits beside, what its threads are about. Vendoring it
-  # would overwrite that with the generic seed on every update, so it
-  # is seeded once and owned by the store thereafter.
-  - "{% if agentic_subtemplate == 'session-memory' %}README.md{% endif %}"
 _jinja_extensions:
   - copier_template_extensions.TemplateExtensionLoader
   - extensions/agentic.py:AgenticExtension

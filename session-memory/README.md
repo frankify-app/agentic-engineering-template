@@ -1,12 +1,17 @@
 # Session Memory
 
-> Seeded from the agentic-engineering-template session subtemplate.
-> This file is yours once stamped — `copier update` will not overwrite
-> it, so record what is specific to this store here.
+> Copier-vendored from the agentic-engineering-template session
+> subtemplate — do NOT edit in the store repo; change it in the
+> template and pull via `copier update`.
 
 What happened, per session: append-only **thread events** — what each
 line of work is, what state it is in, and which conversation moved it
-— plus the conversation exports those events anchor to.
+— plus the conversation exports those events anchor to. The third
+memory store, beside a decision store (rulings) and an evidence store
+(detections).
+
+The data is this repo's; the recorder that writes it ships with the
+`thread-ledger` skill, so N stores cannot drift from one schema.
 
 ## What lives here, and what does not
 
@@ -18,7 +23,8 @@ line of work is, what state it is in, and which conversation moved it
 
 The store is **memory, not a backlog**. Every open thread names a
 forge ticket or is tagged `conversation-only`, and the work is tracked
-there. Two backlogs would mean one stale backlog.
+there. Two backlogs would mean one stale backlog, and the recorder
+rejects an entry that claims neither.
 
 ## Layout
 
@@ -47,8 +53,24 @@ rather than only of what turned out to be true.
 A workflow closes a thread when the thread's own ticket closes: work
 is done when its ticket says so, and noticing it should not depend on
 an agent session happening to be running. Stamped repos report their
-ticket closes here by `repository_dispatch`; the receiver checks every
-live thread's ticket and appends the terminal event.
+ticket closes here by `repository_dispatch` — the template ships that
+sender — and the receiver answers each one by checking every live
+thread's ticket, appending `completed`, or `dropped` for a ticket
+closed as not planned.
+
+Tickets it cannot read are named in the run summary as unchecked,
+never silently skipped: a reconciler that goes quiet about what it did
+not check reads exactly like one that found nothing.
 
 It writes terminal events and nothing else. Reopening a thread whose
-ticket closed too early stays a human's call.
+ticket closed too early stays a human's call — and is the correction
+to make when the workflow got one wrong.
+
+## What goes in a transcript export
+
+User and assistant message text only. Tool results are never exported:
+they carry command output and environment values. Exports are
+secret-scanned, and known-sensitive variables are redacted by name.
+
+Search starts as `rg` over a clone. A vector index earns its place
+against a measured miss rate from a hand-read sample, not before.

@@ -72,12 +72,13 @@ def test_the_answers_file_records_only_the_subtemplate(tmp_path: Path) -> None:
     assert "agentic_project_kind" not in answers
 
 
-def test_the_readme_is_seeded_not_vendored(tmp_path: Path) -> None:
-    """A store's README describes THAT store — which siblings it sits
-    beside, what its threads are about. `_skip_if_exists` keeps an
-    update from replacing that with the generic seed."""
+def test_the_readme_is_vendored(tmp_path: Path) -> None:
+    """The store is data, not the source of its own documentation: what
+    a session store IS belongs to the template, so an edit made in the
+    store is replaced on the next update rather than forking N
+    descriptions of one contract."""
     dst_path = _render_store(tmp_path)
-    (dst_path / "README.md").write_text("# This store's own words\n")
+    (dst_path / "README.md").write_text("# Edited in the store\n")
 
     copier.run_recopy(
         dst_path=dst_path,
@@ -89,7 +90,9 @@ def test_the_readme_is_seeded_not_vendored(tmp_path: Path) -> None:
         vcs_ref="HEAD",
     )
 
-    assert (dst_path / "README.md").read_text() == "# This store's own words\n"
+    assert (dst_path / "README.md").read_text() == (
+        SUBTEMPLATE / "README.md"
+    ).read_text()
 
 
 def test_the_store_names_no_organisation(tmp_path: Path) -> None:
@@ -123,7 +126,9 @@ def test_default_render_carries_no_store_rules(tmp_path: Path) -> None:
         skip_tasks=True,
         vcs_ref="HEAD",
     )
-    assert (dst_path / "AGENTS.md").read_text() != (SUBTEMPLATE / "AGENTS.md").read_text()
+    assert (dst_path / "AGENTS.md").read_text() != (
+        SUBTEMPLATE / "AGENTS.md"
+    ).read_text()
     assert "`ledger/` is append-only" not in (dst_path / "AGENTS.md").read_text()
 
 
