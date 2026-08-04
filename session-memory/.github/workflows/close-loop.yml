@@ -1,0 +1,208 @@
+name: Close the ledger loop
+
+# When a thread's own ticket closes, the thread follows. Work is done
+# when its ticket says so, and noticing should not require an agent
+# session to happen to be running.
+#
+# Event-driven: every stamped repo ships a `ticket-closed` workflow
+# (agentic-engineering-template) that fires repository_dispatch here
+# the moment one of its tickets closes.
+#
+# The dispatch is a wake-up, not a work item. Every run reconciles ALL
+# live threads' tickets, and the payload is deliberately ignored: two
+# closes arriving together share one concurrency group, where a queued
+# run can be superseded — a receiver that trusted each event to name
+# its own ticket would drop the superseded one's close. A full sweep
+# makes any single surviving run cover every close so far, including
+# ones from before a sender repo had its token. The manual trigger is
+# the same sweep for catching up by hand.
+
+on:
+  repository_dispatch:
+    types: [ticket-closed]
+  workflow_dispatch:
+
+permissions:
+  # Naming any permission drops every unnamed one, so `issues: read`
+  # has to be explicit: without it the token cannot read this repo's
+  # own tickets, and the sweep reports all of them as unchecked while
+  # the run still goes green.
+  contents: write
+  issues: read
+
+concurrency:
+  # One group for every trigger, so two dispatches arriving together
+  # serialize instead of racing the log. Never cancel: a cancelled run
+  # can have appended events and not pushed them, which is the one
+  # state that loses work.
+  group: close-loop
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: "closed ticket -> completed thread"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Fetch the recorder
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The tool lives with the skill, not with the data — one
+          # source, and this store never carries a second copy to
+          # drift from it.
+          git clone --depth 1 --filter=blob:none --sparse \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository_owner }}/skills.git" \
+            /tmp/skills
+          git -C /tmp/skills sparse-checkout set original/thread-ledger
+
+      # The release-bot app reads the tickets: its Issues read-only
+      # permission reaches the org's private repos, where the workflow
+      # token cannot. Its key never expires, so there is no yearly
+      # cliff where reads silently narrow to public repos.
+      - name: Mint a token that can read the org's tickets
+        id: app-token
+        # Minting fails when the key is absent or the app lost its
+        # installation; the step below then falls back to the workflow
+        # token and the difference is VISIBLE — every private ticket
+        # lands in the run summary as unchecked.
+        continue-on-error: true
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+        with:
+          app-id: ${{ vars.RELEASE_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Ask each live thread's ticket whether it is closed
+        env:
+          # Tickets the token cannot read are reported below rather
+          # than skipped: a reconciler that goes quiet about what it
+          # did not check reads exactly like one that found nothing.
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        run: |
+          set -euo pipefail
+          node /tmp/skills/original/thread-ledger/ledger.mjs --root . state > /tmp/state.json
+
+          # One entry per ticket that a live thread references, carrying
+          # every thread that references it: a ticket can be worked in
+          # several conversations, and closing it closes all of them.
+          jq -c '
+            [ .[]
+              | select(.state != "completed" and .state != "dropped")
+              | select(.ticket != null)
+            ]
+            | group_by(.ticket)
+            | .[]
+            | { ticket: .[0].ticket,
+                threads: [ .[] | { thread, state } ] }
+          ' /tmp/state.json > /tmp/live.jsonl
+
+          : > /tmp/plan.jsonl
+          : > /tmp/unreadable.txt
+          while read -r row; do
+            ticket=$(jq -r .ticket <<<"$row")
+            repo=${ticket%#*}
+            number=${ticket##*#}
+
+            if ! api=$(gh api "repos/${repo}/issues/${number}" \
+                  --jq '{state: .state, reason: .state_reason}' 2>/dev/null); then
+              echo "${ticket}" >> /tmp/unreadable.txt
+              continue
+            fi
+
+            [ "$(jq -r .state <<<"$api")" = "closed" ] || continue
+
+            # Closed as not planned is not the same as done, and the
+            # ledger has a terminal event for each. Collapsing them
+            # would record work as finished that was abandoned.
+            if [ "$(jq -r .reason <<<"$api")" = "not_planned" ]; then
+              terminal=dropped
+            else
+              terminal=completed
+            fi
+            jq -c --arg terminal "$terminal" '. + {terminal: $terminal}' <<<"$row" \
+              >> /tmp/plan.jsonl
+          done < /tmp/live.jsonl
+
+      - name: Append the terminal events
+        run: |
+          set -euo pipefail
+          ledger() { node /tmp/skills/original/thread-ledger/ledger.mjs --root . "$@"; }
+
+          : > /tmp/appended.txt
+          while read -r row; do
+            ticket=$(jq -r .ticket <<<"$row")
+            terminal=$(jq -r .terminal <<<"$row")
+            while read -r item; do
+              thread=$(jq -r .thread <<<"$item")
+              state=$(jq -r .state <<<"$item")
+
+              # `completed` is illegal from `blocked` and from `parked`,
+              # and rightly so: a blocker that was never cleared is a
+              # blocker nobody looked at again. The board says the work
+              # shipped, so the blocker no longer holds — which is what
+              # `unblocked` records. Written as the legal two-step
+              # rather than carved out of the state machine, because a
+              # carve-out weakens the rule for every writer to serve
+              # this one.
+              if [ "$state" = "blocked" ] || [ "$state" = "parked" ]; then
+                ledger append --ev unblocked --thread "$thread" --by bot --no-push \
+                  --note "${ticket} is closed, so whatever this was waiting on no longer holds."
+              fi
+
+              ledger append --ev "$terminal" --thread "$thread" --by bot --no-push \
+                --note "${ticket} closed; recorded by the close-loop workflow, not by a session."
+
+              echo "- \`${thread}\` -> ${terminal} (${ticket})" >> /tmp/appended.txt
+            done < <(jq -c '.threads[]' <<<"$row")
+          done < /tmp/plan.jsonl
+
+      - name: Push what changed
+        run: |
+          set -euo pipefail
+          git add ledger/
+          # Nothing staged is the ordinary outcome, not a failure: most
+          # runs find every live thread's ticket still open.
+          if git diff --cached --quiet; then
+            echo "No thread changed state."
+            exit 0
+          fi
+          git config user.name "thread-ledger"
+          git config user.email "noreply@anthropic.com"
+          git commit -m "ledger(bot): close threads whose tickets closed" \
+            -m "$(cat /tmp/appended.txt)"
+
+          # Sessions push to this store continuously, and the render job
+          # commits behind us. Rebase and retry rather than force: the
+          # log is append-only and losing someone else's line to win a
+          # race is the one outcome worth failing over.
+          for _ in 1 2 3; do
+            if git push; then exit 0; fi
+            git pull --rebase
+          done
+          git push
+
+      - name: Say what happened
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## Close-loop"
+            echo
+            if [ -s /tmp/appended.txt ]; then
+              cat /tmp/appended.txt
+            else
+              echo "No live thread had a closed ticket."
+            fi
+            if [ -s /tmp/unreadable.txt ]; then
+              echo
+              echo "### Tickets this run could not read"
+              echo
+              echo "Their threads were left alone. Give the release-bot app"
+              echo "Issues read access on their repositories, and this repo its key."
+              echo
+              sed 's/^/- /' /tmp/unreadable.txt
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
