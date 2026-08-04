@@ -637,6 +637,38 @@ def test_github_forge_ships_board_auto_add_workflow(
     )
 
 
+def test_github_forge_ships_ticket_close_dispatch(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """The session-memory store closes a thread when its ticket closes,
+    and it cannot hear another repository's events — so every stamped
+    repo reports its own closes. The store's location is an org-level
+    variable, never baked in at stamping time: the rendered file must
+    name no org's store."""
+    dst_path = _render(tmp_path, base_answers, "ticket-closed")
+
+    _check_file_contents(
+        dst_path / ".github" / "workflows" / "ticket-closed.yml",
+        [
+            "repos/${STORE}/dispatches",
+            "event_type=ticket-closed",
+            # The dispatch crosses repositories, which the repo-scoped
+            # GITHUB_TOKEN cannot do. The release-bot app signs instead
+            # of a PAT: its key already reaches every stamped repo and
+            # never expires.
+            "actions/create-github-app-token",
+            "RELEASE_BOT_PRIVATE_KEY",
+            # The minted token reaches the store repo alone.
+            "repositories: ${{ steps.store.outputs.name }}",
+            # Unset store variable -> visibly SKIPPED, never silent green.
+            "if: ${{ vars.SESSION_MEMORY_REPO != '' }}",
+        ],
+    )
+    content = (dst_path / ".github" / "workflows" / "ticket-closed.yml").read_text()
+    assert "session-memory" not in content.replace("session-memory store", "")
+
+
 def test_forgejo_forge_ships_no_github_org_plumbing(
     tmp_path: Path,
     base_answers: dict[str, str],
