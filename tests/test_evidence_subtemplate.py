@@ -33,6 +33,7 @@ STORE_FILES = frozenset(
         ".github/labels.toml",
         ".github/workflows/guards.yml",
         ".github/workflows/template-update.yml",
+        ".github/workflows/ticket-closed.yml",
         ".github/workflows/labels.yml",
         ".gitignore",
         "AGENTS.md",

@@ -9,12 +9,17 @@ agentic_subtemplate:
     vendored store docs, and a seeded preference set;
     `evidence-memory` stamps an evidence STORE — the capture writer, the
     CI guards (validator + guard runner + workflow), and the vendored
-    store docs. With either store subtemplate, all project-scaffold
-    questions are skipped, keeping the store's answers file minimal.
+    store docs;
+    `session-memory` stamps a session STORE — the store's agent rules
+    and the workflow that reports its ticket closes to the ledger; its
+    recorder ships with the thread-ledger skill, not from here. With
+    any store subtemplate, all project-scaffold questions are skipped,
+    keeping the store's answers file minimal.
   choices:
     - template
     - decision-memory
     - evidence-memory
+    - session-memory
   default: template
 
 agentic_project_name:
@@ -150,6 +155,11 @@ _skip_if_exists:
   # budget a human tuned.
   - "{% if agentic_subtemplate == 'decision-memory' %}preferences.md{% endif %}"
   - "{% if agentic_subtemplate == 'decision-memory' %}store.config.json{% endif %}"
+  # The session store's README describes THAT store — which sibling
+  # stores it sits beside, what its threads are about. Vendoring it
+  # would overwrite that with the generic seed on every update, so it
+  # is seeded once and owned by the store thereafter.
+  - "{% if agentic_subtemplate == 'session-memory' %}README.md{% endif %}"
 _jinja_extensions:
   - copier_template_extensions.TemplateExtensionLoader
   - extensions/agentic.py:AgenticExtension

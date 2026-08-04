@@ -38,6 +38,7 @@ STORE_FILES = frozenset(
         ".github/workflows/preferences-guard.yml",
         ".github/workflows/guards.yml",
         ".github/workflows/template-update.yml",
+        ".github/workflows/ticket-closed.yml",
         ".gitignore",
         "AGENTS.md",
         "CLAUDE.md",
