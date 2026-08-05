@@ -25,6 +25,7 @@ STORE_FILES = frozenset(
     {
         ".copier-answers.agentic.yml",
         ".github/workflows/close-loop.yml",
+        ".github/workflows/ledger-guard.yml",
         ".github/workflows/render-ledger.yml",
         ".github/workflows/template-update.yml",
         ".github/workflows/ticket-closed.yml",
