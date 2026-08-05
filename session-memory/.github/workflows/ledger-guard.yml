@@ -1,0 +1,62 @@
+name: Ledger guard
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ledger/**"
+      - "diligence/**"
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    name: "append-only + fold"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          # The guard judges a RANGE, so the pushed-from commit has to
+          # exist locally; a depth-1 checkout only has the tip.
+          fetch-depth: 0
+
+      - name: Fetch the guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The tool lives with the skill, not with the data — one
+          # source, and this store never carries a second copy to
+          # drift from it. `<owner>/skills` is the convention for
+          # where the thread-ledger skill lives.
+          git clone --depth 1 --filter=blob:none --sparse \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository_owner }}/skills.git" \
+            /tmp/skills
+          git -C /tmp/skills sparse-checkout set original/thread-ledger
+
+      - name: Judge the push
+        run: |
+          set -euo pipefail
+          # Two rules, both from measured incidents: no push removes a
+          # line from ledger/ or diligence/ (the log is append-only,
+          # skills#79), and no event added by the push may be illegal
+          # from the history that precedes it — the union of concurrent
+          # writers merges cleanly in git, and this is where that union
+          # is finally judged (skills#78). A red run here means the
+          # store's history needs a human: the repair is re-appending,
+          # never rewriting.
+          before="${{ github.event.before }}"
+          after="${{ github.event.after }}"
+          if [ "$before" = "0000000000000000000000000000000000000000" ]; then
+            # A new branch has no before; judge the tip commit alone,
+            # unless it is the very first commit and there is nothing
+            # to diff against.
+            if ! git rev-parse -q --verify "${after}^" >/dev/null; then
+              echo "first commit — nothing to judge against."
+              exit 0
+            fi
+            before="${after}^"
+          fi
+          node /tmp/skills/original/thread-ledger/ledger.mjs \
+            --root . guard --range "${before}..${after}"
