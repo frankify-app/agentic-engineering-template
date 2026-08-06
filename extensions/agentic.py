@@ -2,9 +2,32 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
+from pathlib import Path
 
 from jinja2.ext import Extension
+
+# The literal template-side dirname: resolved by copier at render time,
+# opaque to the filesystem, so the path is spelled as it sits on disk.
+_GITHUB_DIR = "{% if agentic_forge == 'github' %}.github{% endif %}"
+
+
+def reference_keywords() -> dict:
+    """The central ticket-reference config, parsed from the template.
+
+    One source of truth (AET#137/#144): the gate script reads this file
+    from the rendered repo at run time, and AGENTS.md renders its rules
+    from the same bytes at generation time — injected here so the two
+    can never drift.
+    """
+    path = (
+        Path(__file__).resolve().parent.parent
+        / "template"
+        / _GITHUB_DIR
+        / "reference-keywords.json"
+    )
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _git_remote_url() -> str | None:
@@ -66,3 +89,4 @@ class AgenticExtension(Extension):
         super().__init__(environment)
         environment.globals["detect_forge"] = detect_forge
         environment.globals["resolve_repo_owner"] = resolve_repo_owner
+        environment.globals["reference_keywords"] = reference_keywords
