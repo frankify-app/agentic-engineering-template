@@ -142,6 +142,24 @@ Code-specific skills:
 - Never push to `main`
 - Create PR immediately on branch creation
 - Commits: conventional commits
+{%- set refkw = reference_keywords() %}
+{%- set closing = refkw.allowed | dictsort | selectattr("1", "equalto", "closing") | map(attribute="0") | list %}
+{%- set nonclosing = refkw.allowed | dictsort | rejectattr("1", "equalto", "closing") | map(attribute="0") | list %}
+- **Ticket references in PR bodies are ALL CAPS, from the central list**
+  (`.github/reference-keywords.json`, enforced by the `ticket` job):
+  {% for word in closing %}`{{ word }} #n`{% if not loop.last %} / {% endif %}{% endfor %} close on merge,
+  {% for word in nonclosing %}`{{ word }} #n`{% if not loop.last %} / {% endif %}{% endfor %} references a
+  multi-PR ticket without closing it. Any native closing keyword
+  ({{ refkw.github_native | join(", ") }}) in any other casing fails
+  the gate — the forge would act on it whether or not the gate
+  recognized the reference. Every ticket number in a
+  `{{ refkw.branch_pattern }}` branch must appear as a canonical
+  reference in the body.
+- **Answer every review comment with a full commit URL or `{{ refkw.no_commit_marker }} <why>`**
+  (enforced by the `review-answers` job): the commit URL must be a real
+  commit on the PR — verify with `git rev-parse` before pasting, never
+  expand a short hash from memory — and resolving a thread is not
+  answering it.
 - Document unexpected encounters and design decisions in commit message as well as PR/Issue
 - **A push rejected over a commit you did not write is rebased around, never forced.**
   Branch rules re-evaluate every commit an update spans, not just the new ones,
