@@ -187,6 +187,21 @@ def test_claude_skills_symlink_bridges_agents_skills(
     _check_file_contents(dst_path / ".pre-commit-config.yaml", ["\\.claude/skills"])
 
 
+def test_vendored_gate_script_is_excluded_from_consumer_lint(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """The gate script is template output, byte-pinned upstream, so a
+    consumer cannot fix a lint finding in it — the next update would
+    overwrite the fix. A consumer whose rules are stricter than the
+    template's own (bandit, full pycodestyle) hit exactly that (#137).
+    """
+    dst_path = _render(tmp_path, base_answers, "vendored-lint")
+
+    assert (dst_path / "scripts" / "ci" / "check_gate.py").exists()
+    _check_file_contents(dst_path / ".pre-commit-config.yaml", ["scripts/ci/"])
+
+
 def test_project_kind_code_renders_code_artifacts(
     tmp_path: Path,
     base_answers: dict[str, str],
