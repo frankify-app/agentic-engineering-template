@@ -37,10 +37,18 @@ For any change touching a templated file, always follow this route:
 This doubles as a proving ground: the self-applied root files are the rendered
 template output, reviewed in the same PR as the template change.
 
+The route is enforced, not merely conventional: a commit that edits a template
+source and the root file it stamps is rejected, by the `self-application-route`
+prek hook at commit time and by the `Template-first route (per commit)` CI job
+over every commit a PR adds. State cannot catch this — a hand-edit that happens
+to match the render leaves a valid tree — so provenance is checked where the
+information still exists, at the commit boundary.
+
 Exception: root files that intentionally diverge from the template are NOT
 overwritten by self-application. The authoritative list is
-`DELIBERATE_DIVERGENCE` in `tests/test_self_application.py`, which fails the
-build when the root and the render disagree anywhere else — so adding a
+`DELIBERATE_DIVERGENCE` in `scripts/dev/self_application.py`, read by both the
+state check (`tests/test_self_application.py`, which fails the build when the
+root and the render disagree anywhere else) and the route guard — so adding a
 template file forces a decision: adopt it at root, or list it with a reason.
 Paths in copier's `_skip_if_exists` are excluded structurally (they are seeded
 once and can never match) rather than listed as choices.

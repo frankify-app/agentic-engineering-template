@@ -8,6 +8,20 @@ ci:
   autoupdate_commit_msg: "chore(pre-commit.ci): pre-commit autoupdate"
 
 repos:
+  - repo: local
+    hooks:
+      # The self-application route, checked where the information still
+      # exists (#130). A root file with a `template/` counterpart is
+      # render output, so a commit edits the source or the stamp, never
+      # both. Reads the staged diff itself rather than the filenames
+      # prek passes, which is what keeps `--all-files` runs quiet: with
+      # nothing staged there is no commit to judge.
+      - id: self-application-route
+        name: "template-first route (source and stamp never in one commit)"
+        entry: python3 scripts/dev/self_application.py
+        language: system
+        pass_filenames: false
+        always_run: true
   - repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
     rev: v9.24.0
     hooks:
