@@ -94,6 +94,75 @@ def test_automated_escape_is_bot_only():
     assert not escaped and problems
 
 
+# ----------------------------------------------- premature close (#150)
+
+
+def test_closing_refs_come_from_the_central_files_closing_tag():
+    body = "CLOSES #5, FIXES pandoscope/skills#9, ADVANCES #7"
+    refs = gate.closing_refs(body, KEYWORDS, "pandoscope/meta")
+    assert refs == ["pandoscope/meta#5", "pandoscope/skills#9"]
+
+
+def test_bare_refs_normalize_and_duplicates_collapse():
+    body = "CLOSES #5 and again CLOSES pandoscope/meta#5"
+    assert gate.closing_refs(body, KEYWORDS, "pandoscope/meta") == ["pandoscope/meta#5"]
+    assert gate.closing_refs("ADVANCES #5", KEYWORDS, "pandoscope/meta") == []
+    assert gate.closing_refs(None, KEYWORDS, "pandoscope/meta") == []
+
+
+def cross_ref(repo, number, state="open", pr=True):
+    issue = {
+        "state": state,
+        "number": number,
+        "repository": {"full_name": repo},
+    }
+    if pr:
+        issue["pull_request"] = {}
+    return {"event": "cross-referenced", "source": {"issue": issue}}
+
+
+def test_open_prs_of_keeps_only_other_open_prs():
+    events = [
+        cross_ref("pandoscope/meta", 66),
+        cross_ref("pandoscope/skills", 113),
+        cross_ref("pandoscope/skills", 112, state="closed"),
+        cross_ref("pandoscope/ghx", 4, pr=False),
+        {"event": "labeled"},
+        cross_ref("pandoscope/skills", 113),
+    ]
+    assert gate.open_prs_of(events, exclude="pandoscope/meta#66") == [
+        "pandoscope/skills#113"
+    ]
+
+
+def test_warning_names_the_open_prs_and_notices_never_fail(capsys, monkeypatch):
+    monkeypatch.setattr(
+        gate, "paginate", lambda path, token: [cross_ref("pandoscope/skills", 113)]
+    )
+    gate.warn_premature_close("CLOSES #5", KEYWORDS, "pandoscope/meta", 66, "tok")
+    out = capsys.readouterr().out
+    assert "::warning::" in out and "pandoscope/skills#113" in out
+
+    gate.warn_premature_close("CLOSES #5", KEYWORDS, "pandoscope/meta", 66, None)
+    assert "::notice::" in capsys.readouterr().out
+
+    def boom(path, token):
+        raise OSError("404")
+
+    monkeypatch.setattr(gate, "paginate", boom)
+    gate.warn_premature_close("CLOSES #5", KEYWORDS, "pandoscope/meta", 66, "tok")
+    out = capsys.readouterr().out
+    assert "::notice::" in out and "::warning::" not in out
+
+
+def test_no_closing_ref_asks_nothing_of_the_network(monkeypatch):
+    def boom(path, token):
+        raise AssertionError("the network must not be touched")
+
+    monkeypatch.setattr(gate, "paginate", boom)
+    gate.warn_premature_close("ADVANCES #5", KEYWORDS, "pandoscope/meta", 66, "tok")
+
+
 # ------------------------------------------------------------ reviews
 
 
