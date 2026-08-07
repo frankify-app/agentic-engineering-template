@@ -19,32 +19,25 @@ import re
 import copier
 import yaml
 
+from tests.conftest import load_module
+
 PROJECT_ROOT = Path(__file__).parent.parent
 
-# Root paths that deliberately diverge from the render. Everything NOT
-# listed here must match, so adding a template file forces a decision:
-# adopt it at root, or list it with a reason.
-DELIBERATE_DIVERGENCE = {
-    # Carries jinja lint hooks the generated config must not have.
-    ".pre-commit-config.yaml": "template-development hooks",
-    # Globs *.md.jinja so the template's own sources are linted.
-    ".markdownlint-cli2.yaml": "lints jinja sources",
-    # This repo has its own ci.yml/release.yml; the rendered workflows
-    # target generated repos, not the template itself.
-    ".github/workflows/lint.yml": "repo has its own CI",
-    ".github/workflows/template-update.yml": "template does not update itself",
-    # The template is not stamped from another template.
-    ".copier-answers.agentic.yml": "not a generated repo",
-    # Agent settings here are repo-local, not the generated defaults.
-    ".claude/settings.json": "repo-local agent settings",
-}
+# The divergence list is the route guard's, not a second copy: the state
+# check here and the provenance check there exempt the same paths, and
+# two lists would drift into disagreeing about what "diverges".
+DELIBERATE_DIVERGENCE = load_module(
+    "self_application", PROJECT_ROOT / "scripts" / "dev" / "self_application.py"
+).DELIBERATE_DIVERGENCE
 
 
 def _skip_if_exists_paths() -> set[str]:
     """Paths copier seeds once and never overwrites.
 
     These can never match after seeding, so they are excluded
-    structurally rather than listed as a choice.
+    structurally rather than listed as a choice. Parsed here with a real
+    YAML reader; `test_self_application_route` pins the route guard's
+    dependency-free reading of the same block against this one.
     """
     config = yaml.safe_load((PROJECT_ROOT / "copier.yml").read_text())
     paths: set[str] = set()

@@ -61,6 +61,30 @@ jobs:
       - run: prek run --all-files --show-diff-on-failure
         shell: bash
 
+  template-route:
+    # The route guard where it actually bites. prek hooks run only in
+    # clones that installed them, and a fresh container or a CI-only
+    # contributor has not — the two violations that motivated #130 were
+    # both caught by human review, not by a hook. Every commit the PR
+    # adds is judged on its own diff, so the boundary information is
+    # still there when this runs.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    name: "Template-first route (per commit)"
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.13"
+      - name: No commit edits a template source and its own stamp
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/dev/self_application.py --range "$BASE_SHA..$HEAD_SHA"
+        shell: bash
+
   conflict-detection:
     # Enforcement arm of the file-ownership policy: copier update merges and
     # writes .rej files but still exits 0. Generate a fixture, run the update
