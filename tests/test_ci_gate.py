@@ -253,6 +253,16 @@ def test_own_run_judged_by_siblings_and_never_waits_for_itself():
     assert pending == [] and len(failures) == 1
 
 
+def test_own_workflow_path_is_static_never_listed():
+    """A review-event re-run is invisible to an event=pull_request run
+    listing, so the gate's own path must come from GITHUB_WORKFLOW_REF —
+    a lookup through the listing misses itself and judges its own
+    workflow by a sibling run the concurrency group already cancelled.
+    """
+    ref = "o/r/.github/workflows/ci-ok.yml@refs/pull/146/merge"
+    assert gate.own_workflow_path(ref, "o/r") == ".github/workflows/ci-ok.yml"
+
+
 # ------------------------------------------------- copies stay pinned
 
 
