@@ -413,6 +413,11 @@ def test_github_forge_ships_template_update_workflow(
             # labels.toml's entry) and applied at creation.
             "gh label create automated",
             "--label automated",
+            # A stale update PR is joined, never closed: the new release
+            # lands as a commit on it and the PR is refreshed in place,
+            # so conflict resolutions on the branch survive (#137).
+            "Skip on a current update PR, join a stale one",
+            'gh pr edit "$EXISTING_PR"',
         ],
     )
 
