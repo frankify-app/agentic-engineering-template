@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -185,6 +186,66 @@ def test_claude_skills_symlink_bridges_agents_skills(
     # through the symlink.
     _check_file_contents(dst_path / ".markdownlint-cli2.yaml", [".claude/skills/**"])
     _check_file_contents(dst_path / ".pre-commit-config.yaml", ["\\.claude/skills"])
+
+
+def test_update_pr_body_cannot_close_an_upstream_ticket(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """Release notes render references as `closes owner/repo#n`, GitHub
+    reads closing keywords in a PR body, and `owner/repo#n` crosses
+    repositories — so merging an update PR here closed a ticket in the
+    template repo (#149). The changelog is quoted material and must not
+    act on anything.
+
+    Behavioural, not textual: the defusing pipeline is lifted out of the
+    rendered workflow and run against a real release-notes excerpt.
+    """
+    dst_path = _render(tmp_path, base_answers, "changelog-defuse")
+    workflow = (dst_path / ".github" / "workflows" / "template-update.yml").read_text()
+
+    defuse = re.search(r'changelog="\$\(printf[\s\S]*?\)"', workflow)
+    assert defuse, "the update workflow no longer defuses the changelog"
+
+    excerpt = (
+        "* **ci:** the gate knows its workflow ([abc1234](u)), closes "
+        "[pandoscope/agentic-engineering-template#137]"
+        "(https://github.com/pandoscope/agentic-engineering-template/issues/137)\n"
+        "* prose that merely closes a chapter, and a fix that helps"
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f"changelog={excerpt!r}\n{defuse.group(0)}\nprintf '%s' \"$changelog\"",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert "closes [" not in result.stdout, (
+        "a closing keyword still precedes a reference"
+    )
+    assert "ref [pandoscope/agentic-engineering-template#137]" in result.stdout
+    # The link survives, and prose that never named an issue is untouched.
+    assert "/issues/137)" in result.stdout
+    assert "closes a chapter, and a fix that helps" in result.stdout
+
+
+def test_vendored_gate_script_is_excluded_from_consumer_lint(
+    tmp_path: Path,
+    base_answers: dict[str, str],
+) -> None:
+    """The gate script is template output, byte-pinned upstream, so a
+    consumer cannot fix a lint finding in it — the next update would
+    overwrite the fix. A consumer whose rules are stricter than the
+    template's own (bandit, full pycodestyle) hit exactly that (#137).
+    """
+    dst_path = _render(tmp_path, base_answers, "vendored-lint")
+
+    assert (dst_path / "scripts" / "ci" / "check_gate.py").exists()
+    _check_file_contents(dst_path / ".pre-commit-config.yaml", ["scripts/ci/"])
 
 
 def test_project_kind_code_renders_code_artifacts(
