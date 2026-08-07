@@ -292,11 +292,26 @@ def own_verdict(jobs):
     return pending, failures
 
 
+def own_workflow_path(workflow_ref, repo):
+    """The gate's own workflow file, from GITHUB_WORKFLOW_REF.
+
+    Static, never inferred from the run listing: the gate re-runs on
+    review events, and those runs are invisible to a listing filtered
+    to `event=pull_request` — the lookup then misses itself and judges
+    its own workflow by a sibling run the concurrency group already
+    cancelled, failing the head that is in fact green.
+    """
+    path = workflow_ref.split("@", 1)[0]
+    prefix = f"{repo}/"
+    return path[len(prefix) :] if path.startswith(prefix) else path
+
+
 def run_aggregate():
     token = os.environ["GH_TOKEN"]
     repo = os.environ["GITHUB_REPOSITORY"]
     sha = os.environ["HEAD_SHA"]
     own_run = int(os.environ["GITHUB_RUN_ID"])
+    own_path = own_workflow_path(os.environ["GITHUB_WORKFLOW_REF"], repo)
     deadline = time.monotonic() + int(os.environ.get("CI_OK_TIMEOUT", "1500"))
 
     workflows = {}
@@ -320,7 +335,6 @@ def run_aggregate():
         runs = {}
         for run in sorted(listed, key=lambda r: r["id"]):
             runs[run["path"]] = run
-        own_path = next((p for p, r in runs.items() if r["id"] == own_run), None)
 
         def jobs_of(run_id):
             return paginate(f"/repos/{repo}/actions/runs/{run_id}/jobs", token, "jobs")
