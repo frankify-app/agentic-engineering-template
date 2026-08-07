@@ -408,6 +408,16 @@ def test_github_forge_ships_template_update_workflow(
             "chore/template-update-",
             # GitHub expressions must survive rendering (file is not Jinja).
             "${{ steps.app-token.outputs.token }}",
+            # The ticket gate's designed escape reaches the PR that needs
+            # it: the label is bootstrapped (this PR may be delivering
+            # labels.toml's entry) and applied at creation.
+            "gh label create automated",
+            "--label automated",
+            # A stale update PR is joined, never closed: the new release
+            # lands as a commit on it and the PR is refreshed in place,
+            # so conflict resolutions on the branch survive (#137).
+            "Skip on a current update PR, join a stale one",
+            'gh pr edit "$EXISTING_PR"',
         ],
     )
 
@@ -498,6 +508,11 @@ def test_github_forge_ships_lint_workflow_with_prek_job(
             "astral-sh/setup-uv",
             # GitHub expressions must survive Jinja rendering.
             "${{ github.ref }}",
+            # commitlint resolves the `extends` preset from the repo
+            # directory, so the preset is installed there — a cache-only
+            # `npx -p` install dies with MODULE_NOT_FOUND (#137).
+            "npm install --no-save --no-audit --no-fund @commitlint/cli@19 @commitlint/config-conventional@19",
+            "npx --no-install commitlint --config commitlint.config.mjs",
         ],
     )
 

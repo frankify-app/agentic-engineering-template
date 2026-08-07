@@ -43,6 +43,9 @@ COMMON_FILES = frozenset(
         "docs/glossary/template.md",
         "scripts/enable-agent-shims.sh",
         "skills-lock.json",
+        # The uniform gate's judge (#137) renders on every forge; only
+        # its GitHub workflow vehicle is forge-conditional.
+        "scripts/ci/check_gate.py",
     }
 )
 
@@ -56,6 +59,10 @@ GITHUB_ONLY_FILES = frozenset(
         ".github/workflows/labels.yml",
         ".github/workflows/lint.yml",
         ".github/workflows/ticket-closed.yml",
+        # The uniform CI gate (#137): the one required context and the
+        # keyword file its checks read.
+        ".github/workflows/ci-ok.yml",
+        ".github/reference-keywords.json",
     }
 )
 
