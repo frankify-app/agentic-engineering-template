@@ -44,12 +44,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Installed into the checkout, not only npx's cache: commitlint
+      # resolves the config's `extends` preset from the REPO directory,
+      # so a cache-only install dies with MODULE_NOT_FOUND in every
+      # repo that carries no node_modules of its own. --no-save keeps
+      # the lockfile-less repos clean; CI discards the directory.
       - name: Lint every commit on this PR
-        run: >
-          npx --yes -p @commitlint/cli@19 -p @commitlint/config-conventional@19
-          commitlint --config commitlint.config.mjs
-          --from {% raw %}${{ github.event.pull_request.base.sha }}{% endraw %}
-          --to {% raw %}${{ github.event.pull_request.head.sha }}{% endraw %}
+        run: |
+          npm install --no-save --no-audit --no-fund @commitlint/cli@19 @commitlint/config-conventional@19
+          npx --no-install commitlint --config commitlint.config.mjs --from {% raw %}${{ github.event.pull_request.base.sha }}{% endraw %} --to {% raw %}${{ github.event.pull_request.head.sha }}{% endraw %}
 {%- if agentic_precommit == 'prek' %}
 
   prek:

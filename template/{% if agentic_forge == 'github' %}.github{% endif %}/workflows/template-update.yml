@@ -260,7 +260,18 @@ jobs:
             echo "$changelog"
           } > /tmp/pr-body.md
 
+          # The ticket gate's designed escape (#137): a bot-authored PR
+          # carrying the `automated` label needs no ticket reference — a
+          # template update traces to a release, not a ticket. The label
+          # is ensured first because this very PR can be the one that
+          # delivers labels.toml's entry to the repo.
+          gh label create automated \
+            --color ededed \
+            --description "Bot-authored maintenance PR; the ticket gate's designed escape" \
+            || true
+
           gh pr create \
             --title "chore: update agentic template to $NEW_REF" \
             --body-file /tmp/pr-body.md \
-            --head "$branch"
+            --head "$branch" \
+            --label automated
